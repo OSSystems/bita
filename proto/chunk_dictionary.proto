@@ -13,20 +13,40 @@ message ChunkCompression
     uint32 compression_level = 3;
 }
 
+message ChunkStore
+{
+    enum StoreType {
+        // Chunk is stored in separate file
+        CHUNK_FILE = 0;
+        // Chunks are inside an archive
+        ARCHIVE = 1;
+    }
+    StoreType store_type = 1;
+
+    // When type is CHUNK_FILE then this path probably refers to a relative directory.
+    // When type is ARCHIVE then it refers to a file. 
+    string store_path = 2;
+}
+
 message ChunkDescriptor
 {
-    // Hash of (uncompressed) chunk
+    // Hash of uncompressed chunk
     bytes checksum = 1;
 
-    // Archive chunk data compression type and level.
-    ChunkCompression compression = 2;
-
-    // Chunk data placement in archive.
-    uint64 archive_size = 3;
-    uint64 archive_offset = 4;
-
     // Size of uncompressed chunk data
-    uint64 source_size = 5;
+    uint64 size = 2;
+
+    // Archive chunk data compression type and level
+    ChunkCompression compression = 3;
+
+    // Size of chunk data when compressed
+    uint64 compressed_size = 4;
+
+    // Chunk data byte offset inside store
+    uint64 archive_offset = 5;
+
+    // Refers to an entry in the location vector of dictionary
+    uint32 location_index = 6;
 }
 
 message ChunkerParameters
@@ -36,23 +56,6 @@ message ChunkerParameters
     uint64 max_chunk_size = 3;
     uint32 hash_window_size = 4;
     uint32 chunk_hash_length = 5;
-}
-
-message ChunkDataLocation {
-    enum Type {
-        // Chunk data is inside archive
-        INTERNAL = 0;
-
-        // Chunk data lives in external file
-        EXTERNAL = 1;
-
-        // Each chunk is in a separate file with file name based on chunk hash
-        PER_CHUNK = 2;
-    }
-    Type location_type = 1;
-
-    // Path to be used if chunks are external to archive
-    string location_path = 2;
 }
 
 message ChunkDictionary
@@ -66,9 +69,10 @@ message ChunkDictionary
     // Total size of the source file
     uint64 source_total_size = 3;
 
-    // Where chunk data lives
-    ChunkDataLocation chunk_data_location = 4;
-
+    // Describes where chunk data stored.
+    // Each chunk descriptor refers to an entry in this list.
+    repeated ChunkStore chunk_stores = 4;
+    
     // Chunker parameters used when building archive
     ChunkerParameters chunker_params = 5;
 

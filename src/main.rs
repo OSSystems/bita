@@ -122,6 +122,12 @@ fn parse_opts() -> Result<Config> {
                         .long("compression")
                         .value_name("TYPE")
                         .help("Set the chunk data compression type (LZMA, ZSTD, NONE) [default: LZMA]."),
+                )
+                .arg(
+                    Arg::with_name("chunk-store")
+                        .long("chunk-store")
+                        .value_name("PATH")
+                        .help("Where chunk data should be stored [default: same as OUTPUT]."),
                 ),
         )
         .subcommand(
@@ -162,6 +168,19 @@ fn parse_opts() -> Result<Config> {
         };
         let temp_file = Path::with_extension(output, ".tmp");
 
+        let chunk_store_path = if let Some(path) = matches.value_of("chunk-store") {
+            Path::new(path).to_path_buf()
+        } else {
+            let output_file = output.file_stem().chain_err(|| "No output file!?")?;
+            if let Some(output_dir) = output.parent() {
+                output_dir
+            } else {
+                Path::new(".")
+            }
+            .join(output_file)
+        };
+        println!("chunk_store_path='{}'", chunk_store_path.display());
+
         let avg_chunk_size = parse_size(matches.value_of("avg-chunk-size").unwrap_or("64KiB"));
         let min_chunk_size = parse_size(matches.value_of("min-chunk-size").unwrap_or("16KiB"));
         let max_chunk_size = parse_size(matches.value_of("max-chunk-size").unwrap_or("16MiB"));
@@ -197,6 +216,7 @@ fn parse_opts() -> Result<Config> {
             hash_length: hash_length
                 .parse()
                 .chain_err(|| "invalid hash length value")?,
+            chunk_store_path: chunk_store_path.to_path_buf(),
             temp_file,
             chunk_filter_bits,
             min_chunk_size,
@@ -241,8 +261,8 @@ fn main() {
         for e in e.iter().skip(1) {
             println!("Caused by: {}", e);
         }
-        // The backtrace is not always generated. Try to run this example
-        // with `RUST_BACKTRACE=1`.
+
+        // Run with 'RUST_BACKTRACE=1' to get full backtrace
         if let Some(backtrace) = e.backtrace() {
             println!("backtrace: {:?}", backtrace);
         }

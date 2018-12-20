@@ -119,13 +119,39 @@ fn chunk_into_file(
             // Store a chunk descriptor which referes to the compressed data
             chunk_descriptors.push(chunk_dictionary::ChunkDescriptor {
                 checksum: hash.to_vec(),
-                source_size: comp_chunk.data.len() as u64,
-                archive_offset,
-                archive_size: chunk_data.len() as u64,
+                size: comp_chunk.data.len() as u64,
+                compressed_size: chunk_data.len() as u64,
+                archive_offset: 0,
+                location_index: 0,
                 compression: protobuf::SingularPtrField::from_option(use_compression),
                 unknown_fields: std::default::Default::default(),
                 cached_size: std::default::Default::default(),
             });
+
+            // Create chunk store file
+            let compression_type_str = match compression_type {
+                chunk_dictionary::ChunkCompression_CompressionType::LZMA => "lzma",
+                chunk_dictionary::ChunkCompression_CompressionType::ZSTD => "zstd",
+                chunk_dictionary::ChunkCompression_CompressionType::NONE => "none",
+            };
+            let chunk_file_path = config
+                .chunk_store_path
+                .join(buf_to_hex_str(hash))
+                .with_extension(compression_type_str.to_string() + ".chunk");
+
+            // TODO: If file exist - overwrite or verify the content and leave as is?
+            let mut chunk_file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&chunk_file_path)
+                .chain_err(|| {
+                    format!(
+                        "unable to create chunk file ({})",
+                        chunk_file_path.display()
+                    )
+                })
+                .expect("create chunk file");
 
             chunk_file.write_all(chunk_data).expect("write chunk");
             archive_offset += chunk_data.len() as u64;
@@ -198,6 +224,9 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
         .open(&config.output)
         .chain_err(|| format!("unable to create output file ({})", config.output.display()))?;
 
+    std::fs::create_dir_all(&config.chunk_store_path)
+        .chain_err(|| "Failed to create directory for chunk store")?;
+
     let mut tmp_chunk_file = OpenOptions::new()
         .write(true)
         .read(true)
@@ -224,7 +253,16 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
         application_version: ::PKG_VERSION.to_string(),
         chunk_descriptors: RepeatedField::from_vec(chunk_file_descriptor.chunk_descriptors),
         source_checksum: chunk_file_descriptor.file_hash,
-        chunk_data_location: SingularPtrField::none(),
+        chunk_stores: RepeatedField::from_vec(vec![chunk_dictionary::ChunkStore {
+            store_type: chunk_dictionary::ChunkStore_StoreType::CHUNK_FILE,
+            store_path: config
+                .chunk_store_path
+                .to_str()
+                .chain_err(|| "couldn't stringify chunk store path")?
+                .to_string(),
+            unknown_fields: std::default::Default::default(),
+            cached_size: std::default::Default::default(),
+        }]),
         source_total_size: chunk_file_descriptor.total_file_size as u64,
         chunker_params: SingularPtrField::some(chunk_dictionary::ChunkerParameters {
             chunk_filter_bits: config.chunk_filter_bits,

@@ -49,3 +49,7 @@ pub fn size_to_str<T: Int + fmt::Display>(size: T) -> String {
         format!("{} bytes", size)
     }
 }
+
+pub fn buf_to_hex_str(buf: &[u8]) -> String {
+    buf.iter().map(|v| format!("{:02x}", v)).collect()
+}

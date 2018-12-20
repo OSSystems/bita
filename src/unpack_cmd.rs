@@ -229,7 +229,7 @@ where
                 println!(
                     "Chunk '{}', size {}, decompressed to {}, insert at {:?}",
                     HexSlice::new(&chunk_descriptor.checksum),
-                    size_to_str(chunk_descriptor.archive_size),
+                    size_to_str(chunk_descriptor.compressed_size),
                     size_to_str(chunk_data.len()),
                     offsets
                 );

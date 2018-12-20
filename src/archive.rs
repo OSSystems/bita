@@ -1,33 +1,23 @@
 use protobuf::Message;
+use std::path::{Path, PathBuf};
 
 use blake2::{Blake2b, Digest};
 use std::fmt;
 
 use chunk_dictionary;
-use chunk_dictionary::{ChunkDataLocation, ChunkDataLocation_Type};
 use errors::*;
 use string_utils::*;
-
-impl fmt::Display for ChunkDataLocation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.location_type {
-            ChunkDataLocation_Type::INTERNAL => write!(f, "internal"),
-            ChunkDataLocation_Type::EXTERNAL => write!(f, "external ({})", self.location_path),
-            ChunkDataLocation_Type::PER_CHUNK => write!(f, "chunkvise"),
-        }
-    }
-}
 
 impl fmt::Display for chunk_dictionary::ChunkDictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "version: {}, chunks: {}, source hash: {}, source size: {}, data location: {}",
+            "version: {}, chunks: {}, source hash: {}, source size: {}, chunk stores: '{:?}'",
             self.application_version,
             self.chunk_descriptors.len(),
             HexSlice::new(&self.source_checksum),
             size_to_str(self.source_total_size),
-            self.get_chunk_data_location()
+            self.chunk_stores
         )
     }
 }

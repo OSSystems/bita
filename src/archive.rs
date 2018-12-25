@@ -1,10 +1,10 @@
-use protobuf::Message;
-use std::path::{Path, PathBuf};
-
 use blake2::{Blake2b, Digest};
+use protobuf::Message;
 use std::fmt;
+use std::rc::Rc;
 
 use chunk_dictionary;
+use chunker_utils::HashBuf;
 use errors::*;
 use string_utils::*;
 
@@ -46,6 +46,22 @@ pub fn vec_to_size(sv: &[u8]) -> u64 {
         | u64::from(sv[7])
 }
 
+#[derive(Debug)]
+pub struct ChunkStore {
+    pub store_type: chunk_dictionary::ChunkStore_StoreType,
+    pub store_path: String,
+}
+
+#[derive(Debug)]
+pub struct ChunkDescriptor {
+    pub checksum: HashBuf,
+    pub size: u64,
+    pub compression: chunk_dictionary::ChunkCompression,
+    pub stored_size: u64,
+    pub store_offset: u64,
+    pub store: Rc<ChunkStore>,
+}
+
 impl fmt::Display for chunk_dictionary::ChunkCompression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.compression {
@@ -81,19 +97,10 @@ pub fn build_header(dictionary: &chunk_dictionary::ChunkDictionary) -> Result<Ve
     // The chunk dictionary
     header.extend(dictionary_buf);
 
-    // Chunk data offset. 0 if not used.
-    // For now it will always start where the header hash ends, that is current size
-    // of header buffer + 8 for this size value + 64 for header hash value
-    {
-        let offset = header.len() + 8 + 64;
-        println!("Chunk data offset: {}", offset);
-        header.extend(&size_vec(offset as u64));
-    }
-
     // Create and set hash of full header
     hasher.input(&header);
     let hash = hasher.result().to_vec();
-    println!("Header hash: {}", HexSlice::new(&hash));
+    println!("Dictionary hash: {}", HexSlice::new(&hash));
     header.extend(hash);
 
     Ok(header)

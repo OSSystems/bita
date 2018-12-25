@@ -72,7 +72,7 @@ fn parse_opts() -> Result<Config> {
                         .short("i")
                         .long("input")
                         .value_name("FILE")
-                        .help("Input file. If none is given the stdin will be used.")
+                        .help("Input file. If none is given then stdin will be used.")
                         .required(false),
                 )
                 .arg(
@@ -115,7 +115,7 @@ fn parse_opts() -> Result<Config> {
                     Arg::with_name("compression-level")
                         .long("compression-level")
                         .value_name("LEVEL")
-                        .help("Set the chunk data compression level (0-9) [default: 6]."),
+                        .help("Set the chunk data compression level (1-19) [default: 6]."),
                 )
                 .arg(
                     Arg::with_name("compression")
@@ -124,11 +124,19 @@ fn parse_opts() -> Result<Config> {
                         .help("Set the chunk data compression type (LZMA, ZSTD, NONE) [default: LZMA]."),
                 )
                 .arg(
-                    Arg::with_name("chunk-store")
-                        .long("chunk-store")
-                        .value_name("PATH")
-                        .help("Where chunk data should be stored [default: same as OUTPUT]."),
-                ),
+                    Arg::with_name("chunk-dir")
+                        .long("chunk-dir")
+                        .conflicts_with("chunk-archive")
+                        .value_name("DIRECTORY")
+                        .help("Where chunk files should be stored [default: OUTPUT.store]."),
+                )
+                .arg(
+                    Arg::with_name("chunk-archive")
+                        .long("chunk-archive")
+                        .conflicts_with("chunk-store")
+                        .value_name("FILE")
+                        .help("File where chunk data should be stored."),
+                )
         )
         .subcommand(
             SubCommand::with_name("unpack")
@@ -166,20 +174,24 @@ fn parse_opts() -> Result<Config> {
         } else {
             None
         };
-        let temp_file = Path::with_extension(output, ".tmp");
 
-        let chunk_store_path = if let Some(path) = matches.value_of("chunk-store") {
-            Path::new(path).to_path_buf()
+        let chunk_store = if let Some(chunk_archive_path) = matches.value_of("chunk-archive") {
+            ChunkStoreType::Archive(Path::new(chunk_archive_path).to_path_buf())
         } else {
-            let output_file = output.file_stem().chain_err(|| "No output file!?")?;
-            if let Some(output_dir) = output.parent() {
-                output_dir
+            let chunk_dir_path = if let Some(path) = matches.value_of("chunk-dir") {
+                Path::new(path).to_path_buf()
             } else {
-                Path::new(".")
-            }
-            .join(output_file)
+                let output_file = output.file_stem().chain_err(|| "No output file!?")?;
+                if let Some(output_dir) = output.parent() {
+                    output_dir
+                } else {
+                    Path::new(".")
+                }
+                .join(output_file)
+                .with_extension("store")
+            };
+            ChunkStoreType::Directory(chunk_dir_path.to_path_buf())
         };
-        println!("chunk_store_path='{}'", chunk_store_path.display());
 
         let avg_chunk_size = parse_size(matches.value_of("avg-chunk-size").unwrap_or("64KiB"));
         let min_chunk_size = parse_size(matches.value_of("min-chunk-size").unwrap_or("16KiB"));
@@ -205,19 +217,18 @@ fn parse_opts() -> Result<Config> {
         if max_chunk_size < avg_chunk_size {
             bail!("max-chunk-size < avg-chunk-size");
         }
-        if compression_level > 9 {
+        if compression_level < 1 || compression_level > 19 {
             bail!("compression level not within range");
         }
 
         Ok(Config::Compress(CompressConfig {
             base: base_config,
-            input: input,
+            input,
             output: output.to_path_buf(),
             hash_length: hash_length
                 .parse()
                 .chain_err(|| "invalid hash length value")?,
-            chunk_store_path: chunk_store_path.to_path_buf(),
-            temp_file,
+            chunk_store,
             chunk_filter_bits,
             min_chunk_size,
             max_chunk_size,

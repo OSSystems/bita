@@ -2,10 +2,9 @@ use atty::Stream;
 use blake2::{Blake2b, Digest};
 use lzma::LzmaWriter;
 use protobuf::{RepeatedField, SingularPtrField};
-use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use string_utils::*;
 use threadpool::ThreadPool;
 
@@ -28,7 +27,7 @@ struct ChunkFileDescriptor {
 fn chunk_into_file(
     config: &CompressConfig,
     pool: &ThreadPool,
-    chunk_file: &mut File,
+    archive_file: &mut Option<File>,
 ) -> Result<ChunkFileDescriptor> {
     // Setup the chunker
     let mut chunker = Chunker::new(
@@ -120,9 +119,9 @@ fn chunk_into_file(
             chunk_descriptors.push(chunk_dictionary::ChunkDescriptor {
                 checksum: hash.to_vec(),
                 size: comp_chunk.data.len() as u64,
-                compressed_size: chunk_data.len() as u64,
-                archive_offset: 0,
-                location_index: 0,
+                stored_size: chunk_data.len() as u64,
+                store_offset: archive_offset,
+                store_index: 0, // Will only be a single store setup for now
                 compression: protobuf::SingularPtrField::from_option(use_compression),
                 unknown_fields: std::default::Default::default(),
                 cached_size: std::default::Default::default(),
@@ -134,27 +133,35 @@ fn chunk_into_file(
                 chunk_dictionary::ChunkCompression_CompressionType::ZSTD => "zstd",
                 chunk_dictionary::ChunkCompression_CompressionType::NONE => "none",
             };
-            let chunk_file_path = config
-                .chunk_store_path
-                .join(buf_to_hex_str(hash))
-                .with_extension(compression_type_str.to_string() + ".chunk");
+            match &config.chunk_store {
+                ChunkStoreType::Directory(ref chunk_dir_path) => {
+                    let chunk_file_path = chunk_dir_path
+                        .join(buf_to_hex_str(hash))
+                        .with_extension(compression_type_str.to_string() + ".chunk");
 
-            // TODO: If file exist - overwrite or verify the content and leave as is?
-            let mut chunk_file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&chunk_file_path)
-                .chain_err(|| {
-                    format!(
-                        "unable to create chunk file ({})",
-                        chunk_file_path.display()
-                    )
-                })
-                .expect("create chunk file");
+                    // TODO: If file exist - overwrite or verify the content and leave as is?
+                    let mut chunk_file = OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&chunk_file_path)
+                        .chain_err(|| {
+                            format!(
+                                "unable to create chunk file ({})",
+                                chunk_file_path.display()
+                            )
+                        })
+                        .expect("create chunk file");
 
-            chunk_file.write_all(chunk_data).expect("write chunk");
-            archive_offset += chunk_data.len() as u64;
+                    chunk_file.write_all(chunk_data).expect("write chunk");
+                }
+                ChunkStoreType::Archive(_) => {
+                    if let Some(ref mut chunk_file) = archive_file {
+                        chunk_file.write_all(chunk_data).expect("write chunk");
+                        archive_offset += chunk_data.len() as u64;
+                    }
+                }
+            }
         };
 
         if let Some(ref input_path) = config.input {
@@ -224,19 +231,34 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
         .open(&config.output)
         .chain_err(|| format!("unable to create output file ({})", config.output.display()))?;
 
-    std::fs::create_dir_all(&config.chunk_store_path)
-        .chain_err(|| "Failed to create directory for chunk store")?;
-
-    let mut tmp_chunk_file = OpenOptions::new()
-        .write(true)
-        .read(true)
-        .truncate(true)
-        .create(true)
-        .open(&config.temp_file)
-        .chain_err(|| "unable to create temporary chunk file")?;
+    // Create chunk store directory/file
+    let mut archive_file;
+    match &config.chunk_store {
+        ChunkStoreType::Directory(ref chunk_dir_path) => {
+            std::fs::create_dir_all(chunk_dir_path)
+                .chain_err(|| "Failed to create directory for chunk store")?;
+            archive_file = None;
+        }
+        ChunkStoreType::Archive(ref chunk_archive_path) => {
+            archive_file = Some(
+                OpenOptions::new()
+                    .write(true)
+                    .create(config.base.force_create)
+                    .truncate(config.base.force_create)
+                    .create_new(!config.base.force_create)
+                    .open(&chunk_archive_path)
+                    .chain_err(|| {
+                        format!(
+                            "unable to create output file ({})",
+                            chunk_archive_path.display()
+                        )
+                    })?,
+            );
+        }
+    };
 
     // Generate chunks and store to a temp file
-    let chunk_file_descriptor = chunk_into_file(&config, pool, &mut tmp_chunk_file)?;
+    let chunk_file_descriptor = chunk_into_file(&config, pool, &mut archive_file)?;
 
     println!(
         "Source hash: {}",
@@ -244,6 +266,27 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
     );
 
     // Store header to output file
+    let chunk_store = match &config.chunk_store {
+        ChunkStoreType::Directory(ref path) => chunk_dictionary::ChunkStore {
+            store_type: chunk_dictionary::ChunkStore_StoreType::CHUNK_DIRECTORY,
+            store_path: path
+                .to_str()
+                .chain_err(|| "failed to convert path")?
+                .to_string(),
+            unknown_fields: std::default::Default::default(),
+            cached_size: std::default::Default::default(),
+        },
+        ChunkStoreType::Archive(ref path) => chunk_dictionary::ChunkStore {
+            store_type: chunk_dictionary::ChunkStore_StoreType::CHUNK_ARCHIVE,
+            store_path: path
+                .to_str()
+                .chain_err(|| "failed to convert path")?
+                .to_string(),
+            unknown_fields: std::default::Default::default(),
+            cached_size: std::default::Default::default(),
+        },
+    };
+
     let file_header = chunk_dictionary::ChunkDictionary {
         rebuild_order: chunk_file_descriptor
             .chunk_order
@@ -253,16 +296,7 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
         application_version: ::PKG_VERSION.to_string(),
         chunk_descriptors: RepeatedField::from_vec(chunk_file_descriptor.chunk_descriptors),
         source_checksum: chunk_file_descriptor.file_hash,
-        chunk_stores: RepeatedField::from_vec(vec![chunk_dictionary::ChunkStore {
-            store_type: chunk_dictionary::ChunkStore_StoreType::CHUNK_FILE,
-            store_path: config
-                .chunk_store_path
-                .to_str()
-                .chain_err(|| "couldn't stringify chunk store path")?
-                .to_string(),
-            unknown_fields: std::default::Default::default(),
-            cached_size: std::default::Default::default(),
-        }]),
+        chunk_stores: RepeatedField::from_vec(vec![chunk_store]),
         source_total_size: chunk_file_descriptor.total_file_size as u64,
         chunker_params: SingularPtrField::some(chunk_dictionary::ChunkerParameters {
             chunk_filter_bits: config.chunk_filter_bits,
@@ -279,17 +313,10 @@ pub fn run(config: &CompressConfig, pool: &ThreadPool) -> Result<()> {
 
     // Copy chunks from temporary chunk tile to the output one
     let header_buf = archive::build_header(&file_header)?;
-    println!("Header size: {}", header_buf.len());
+    println!("Dictionary size: {}", header_buf.len());
     output_file
         .write_all(&header_buf)
-        .chain_err(|| "failed to write header")?;
-    tmp_chunk_file
-        .seek(SeekFrom::Start(0))
-        .chain_err(|| "failed to seek")?;
-    io::copy(&mut tmp_chunk_file, &mut output_file)
-        .chain_err(|| "failed to write chunk data to output file")?;
-    drop(tmp_chunk_file);
-    fs::remove_file(&config.temp_file).chain_err(|| "unable to remove temporary file")?;
+        .chain_err(|| "failed to write dictionary")?;
 
     Ok(())
 }

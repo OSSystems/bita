@@ -36,8 +36,6 @@ impl io::Read for RemoteReader {
     }
 }
 
-
-
 impl ArchiveBackend for RemoteReader {
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<()> {
         if buf.is_empty() {

@@ -16,15 +16,15 @@ message ChunkCompression
 message ChunkStore
 {
     enum StoreType {
-        // Chunk is stored in separate file
-        CHUNK_FILE = 0;
-        // Chunks are inside an archive
-        ARCHIVE = 1;
+        // Chunk is stored in separate file under a directory
+        CHUNK_DIRECTORY = 0;
+        // Chunk is inside a file with multiple chunks
+        CHUNK_ARCHIVE = 1;
     }
     StoreType store_type = 1;
 
     // When type is CHUNK_FILE then this path probably refers to a relative directory.
-    // When type is ARCHIVE then it refers to a file. 
+    // When type is CHUNK_ARCHIVE then it refers to a file.
     string store_path = 2;
 }
 
@@ -36,17 +36,17 @@ message ChunkDescriptor
     // Size of uncompressed chunk data
     uint64 size = 2;
 
-    // Archive chunk data compression type and level
+    // Chunk data compression type and level
     ChunkCompression compression = 3;
 
-    // Size of chunk data when compressed
-    uint64 compressed_size = 4;
+    // Size of chunk data when in store
+    uint64 stored_size = 4;
 
-    // Chunk data byte offset inside store
-    uint64 archive_offset = 5;
+    // Chunk data byte offset inside store file
+    uint64 store_offset = 5;
 
-    // Refers to an entry in the location vector of dictionary
-    uint32 location_index = 6;
+    // Refers to an entry in the chunk_stores of dictionary
+    uint32 store_index = 6;
 }
 
 message ChunkerParameters

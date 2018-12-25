@@ -7,14 +7,19 @@ pub struct BaseConfig {
 }
 
 #[derive(Debug)]
+pub enum ChunkStoreType {
+    Directory(PathBuf),
+    Archive(PathBuf),
+}
+
+#[derive(Debug)]
 pub struct CompressConfig {
     pub base: BaseConfig,
 
     // Use stdin if input not given
     pub input: Option<PathBuf>,
     pub output: PathBuf,
-    pub chunk_store_path: PathBuf,
-    pub temp_file: PathBuf,
+    pub chunk_store: ChunkStoreType,
     pub hash_length: usize,
     pub chunk_filter_bits: u32,
     pub min_chunk_size: usize,

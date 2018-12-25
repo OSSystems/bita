@@ -9,6 +9,7 @@ use std::io::SeekFrom;
 use threadpool::ThreadPool;
 
 use archive_reader::*;
+use chunk_dictionary;
 use chunker::Chunker;
 use chunker_utils::*;
 use config::*;
@@ -225,21 +226,20 @@ where
                     .chain_err(|| "failed to write output file")?;
             }
 
-            if chunk_descriptor.compression.is_some() {
-                println!(
-                    "Chunk '{}', size {}, decompressed to {}, insert at {:?}",
-                    HexSlice::new(&chunk_descriptor.checksum),
-                    size_to_str(chunk_descriptor.compressed_size),
-                    size_to_str(chunk_data.len()),
-                    offsets
-                );
-            } else {
-                println!(
+            match chunk_descriptor.compression.get_compression() {
+                chunk_dictionary::ChunkCompression_CompressionType::NONE => println!(
                     "Chunk '{}', size {}, uncompressed, insert at {:?}",
                     HexSlice::new(&chunk_descriptor.checksum),
                     size_to_str(chunk_data.len()),
                     offsets
-                );
+                ),
+                _ => println!(
+                    "Chunk '{}', size {}, decompressed to {}, insert at {:?}",
+                    HexSlice::new(&chunk_descriptor.checksum),
+                    size_to_str(chunk_descriptor.stored_size),
+                    size_to_str(chunk_data.len()),
+                    offsets
+                ),
             }
 
             Ok(())

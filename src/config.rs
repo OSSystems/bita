@@ -29,7 +29,7 @@ pub struct CompressConfig {
     pub compression: chunk_dictionary::ChunkCompression_CompressionType,
 }
 #[derive(Debug)]
-pub struct UnpackConfig {
+pub struct CloneConfig {
     pub base: BaseConfig,
 
     pub input: String,
@@ -41,5 +41,5 @@ pub struct UnpackConfig {
 #[derive(Debug)]
 pub enum Config {
     Compress(CompressConfig),
-    Unpack(UnpackConfig),
+    Clone(CloneConfig),
 }

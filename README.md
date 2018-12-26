@@ -8,7 +8,7 @@ On compression the source is scanned for chunks using a rolling hash for decidin
 Chunks are compressed and duplicated chunks are removed, then stored in either a chunk directory or a chunk archive.
 A dictionary which describes how to rebuild the source file is also created along the chunk store.
 
-On fetch the chunk dictionary is first downloaded, then bita scans the given seed files for chunks which are in the dictionary.
+On clone the chunk dictionary is downloaded, then bita scans the given seed files for chunks which are in the dictionary.
 Any matching chunk found in a seed will be inserted into the output file.
 When all the given seeds has been consumed the chunks still missing is downloaded from the remote archive.
 
@@ -39,7 +39,7 @@ As default bita compress chunk data using lzma at level 6. No compression and zs
 ### Operation
 Bita allows for three main operations:
 * compress - Create a dictionary+archive/chunk store from a source file.
-* fetch - Donwload an archive. Can use local seeds. Can also unpack the archive to a (seekable) file on the fly.
+* clone - Clone a remote dictionary and chunk store. Can use local seeds. Can also unpack the archive to a (seekable) file on the fly.
 * unpack - Unpack a local archive. Can not use seeds. Can write to stdout.
 
 
@@ -48,17 +48,17 @@ Bita allows for three main operations:
 
 ## Example usage
 
-##### Compress stream from stdin
+##### Compress from stdin
 `olle@host:~$ gunzip -c file.gz | bita compress --compression ZSTD --compression-level 9 file.cba`
 
 ##### Compress a file
 `olle@host:~$ bita compress file.ext4 file.ext4.cba`
 
-##### Fetch archive using multiple seeds
-`olle@device:~$ gunzip -c old.tar.gz | bita fetch --seed an_old.cba --seed another_old.tar http://host/file.cba file.cba`
+##### Clone using multiple seeds
+`olle@device:~$ gunzip -c old.tar.gz | bita clone --seed an_old.cba --seed another_old.tar http://host/file.cba file.cba`
 
-##### Fetch and decompress using block device as seed and target
-`olle@device:~$ bita fetch --seed /dev/disk/by-partlabel/rootfs-A --unpack http://host/file.ext4.cba /dev/disk/by-partlabel/rootfs-B`
+##### Clone and decompress using block device as seed and target
+`olle@device:~$ bita clone --seed /dev/disk/by-partlabel/rootfs-A --unpack http://host/file.ext4.cba /dev/disk/by-partlabel/rootfs-B`
 
 
 ##### Unpack a local archive

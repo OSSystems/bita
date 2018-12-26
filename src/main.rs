@@ -16,6 +16,7 @@ mod buzhash;
 mod chunk_dictionary;
 mod chunker;
 mod chunker_utils;
+mod clone_cmd;
 mod compress_cmd;
 mod config;
 mod errors;
@@ -23,7 +24,6 @@ mod file_archive_backend;
 mod ordered_mpsc;
 mod remote_archive_backend;
 mod string_utils;
-mod unpack_cmd;
 
 use std::process;
 use threadpool::ThreadPool;
@@ -139,8 +139,8 @@ fn parse_opts() -> Result<Config> {
                 )
         )
         .subcommand(
-            SubCommand::with_name("unpack")
-                .about("Unpack a file.")
+            SubCommand::with_name("clone")
+                .about("Clone a bita archive.")
                 .arg(
                     Arg::with_name("INPUT")
                         .value_name("INPUT")
@@ -157,7 +157,7 @@ fn parse_opts() -> Result<Config> {
                     Arg::with_name("seed")
                         .value_name("FILE")
                         .long("seed")
-                        .help("File(s) to use as seed while unpacking.")
+                        .help("Local file to use as seed while cloning.")
                         .multiple(true),
                 ),
         )
@@ -236,7 +236,7 @@ fn parse_opts() -> Result<Config> {
             compression_level,
             compression,
         }))
-    } else if let Some(matches) = matches.subcommand_matches("unpack") {
+    } else if let Some(matches) = matches.subcommand_matches("clone") {
         let input = matches.value_of("INPUT").unwrap();
         let output = matches.value_of("OUTPUT").unwrap_or("");
         let seed_files = matches
@@ -244,7 +244,7 @@ fn parse_opts() -> Result<Config> {
             .unwrap_or_default()
             .map(|s| s.to_string())
             .collect();
-        Ok(Config::Unpack(UnpackConfig {
+        Ok(Config::Clone(CloneConfig {
             base: base_config,
             input: input.to_string(),
             output: output.to_string(),
@@ -263,7 +263,7 @@ fn main() {
 
     let result = match parse_opts() {
         Ok(Config::Compress(config)) => compress_cmd::run(&config, &pool),
-        Ok(Config::Unpack(config)) => unpack_cmd::run(&config, &pool),
+        Ok(Config::Clone(config)) => clone_cmd::run(&config, &pool),
         Err(e) => Err(e),
     };
     if let Err(ref e) = result {

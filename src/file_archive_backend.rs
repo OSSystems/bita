@@ -6,7 +6,7 @@ use archive_reader::*;
 use errors::*;
 
 impl ArchiveBackend for File {
-    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<()> {
+    fn read_at(&mut self, store_path: &str, offset: u64, buf: &mut [u8]) -> Result<()> {
         self.seek(SeekFrom::Start(offset))
             .chain_err(|| "failed to seek archive file")?;
         self.read_exact(buf)
@@ -15,6 +15,7 @@ impl ArchiveBackend for File {
     }
     fn read_in_chunks<F: FnMut(Vec<u8>) -> Result<()>>(
         &mut self,
+        store_path: &str,
         start_offset: u64,
         chunk_sizes: &[u64],
         mut chunk_callback: F,

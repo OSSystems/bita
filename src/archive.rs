@@ -1,6 +1,7 @@
 use blake2::{Blake2b, Digest};
 use protobuf::Message;
 use std::fmt;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use chunk_dictionary;
@@ -46,10 +47,10 @@ pub fn vec_to_size(sv: &[u8]) -> u64 {
         | u64::from(sv[7])
 }
 
-#[derive(Debug)]
-pub struct ChunkStore {
-    pub store_type: chunk_dictionary::ChunkStore_StoreType,
-    pub store_path: String,
+#[derive(Debug, PartialEq)]
+pub enum ChunkStore {
+    Directory(PathBuf),
+    Archive(PathBuf),
 }
 
 #[derive(Debug)]
@@ -60,6 +61,20 @@ pub struct ChunkDescriptor {
     pub stored_size: u64,
     pub store_offset: u64,
     pub store: Rc<ChunkStore>,
+}
+
+impl ChunkDescriptor {
+    pub fn store_path(&self) -> PathBuf {
+        match *self.store {
+            ChunkStore::Directory(ref store_path) => store_path
+                .join(buf_to_hex_str(&self.checksum))
+                .with_extension(
+                    compression_type_to_str(self.compression.get_compression()).to_string()
+                        + ".chunk",
+                ),
+            ChunkStore::Archive(ref store_path) => store_path.to_path_buf(),
+        }
+    }
 }
 
 impl fmt::Display for chunk_dictionary::ChunkCompression {
@@ -73,6 +88,16 @@ impl fmt::Display for chunk_dictionary::ChunkCompression {
                 write!(f, "ZSTD({})", self.compression_level)
             }
         }
+    }
+}
+
+pub fn compression_type_to_str(
+    compression_type: chunk_dictionary::ChunkCompression_CompressionType,
+) -> &'static str {
+    match compression_type {
+        chunk_dictionary::ChunkCompression_CompressionType::LZMA => "lzma",
+        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => "zstd",
+        chunk_dictionary::ChunkCompression_CompressionType::NONE => "none",
     }
 }
 

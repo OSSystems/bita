@@ -97,7 +97,6 @@ fn chunk_into_file(
                 chunk_data = &comp_chunk.data;
                 None
             };
-
             println!(
                 "Chunk {}, '{}', offset: {}, size: {}, compressed to: {}, compression: {}",
                 total_unique_chunks,
@@ -108,12 +107,18 @@ fn chunk_into_file(
                 match use_compression {
                     None => "none".to_owned(),
                     Some(ref v) => format!("{}", v),
-                },
+                }
             );
 
             total_unique_chunks += 1;
             total_unique_chunk_size += comp_chunk.data.len();
             total_compressed_size += chunk_data.len();
+
+            let compression_type_str = archive::compression_type_to_str(match use_compression {
+                None => chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                Some(ref v) => v.compression,
+            })
+            .to_string();
 
             // Store a chunk descriptor which referes to the compressed data
             chunk_descriptors.push(chunk_dictionary::ChunkDescriptor {
@@ -127,12 +132,7 @@ fn chunk_into_file(
                 cached_size: std::default::Default::default(),
             });
 
-            // Create chunk store file
-            let compression_type_str = match compression_type {
-                chunk_dictionary::ChunkCompression_CompressionType::LZMA => "lzma",
-                chunk_dictionary::ChunkCompression_CompressionType::ZSTD => "zstd",
-                chunk_dictionary::ChunkCompression_CompressionType::NONE => "none",
-            };
+            // Create chunk store file or store in chunk archive
             match &config.chunk_store {
                 ChunkStoreType::Directory(ref chunk_dir_path) => {
                     let chunk_file_path = chunk_dir_path

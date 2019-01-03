@@ -4,6 +4,7 @@ use lzma::LzmaWriter;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::prelude::*;
+use std::path::Path;
 use std::rc::Rc;
 use string_utils::*;
 
@@ -80,11 +81,12 @@ where
     // Read from archive into the given buffer.
     // Should read the exact number of bytes of the given buffer and start read at
     // given offset.
-    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<()>;
+    fn read_at(&mut self, store_path: &str, offset: u64, buf: &mut [u8]) -> Result<()>;
 
     // Read and return chunked data
     fn read_in_chunks<F: FnMut(Vec<u8>) -> Result<()>>(
         &mut self,
+        store_path: &str,
         start_offset: u64,
         chunk_sizes: &[u64],
         chunk_callback: F,
@@ -114,7 +116,6 @@ impl ArchiveReader {
         R: Read,
     {
         // Read the pre-header (file magic, version and size)
-        //let mut header_buf = vec![0; 13];
         header_buf.resize(13, 0);
         input
             .read_exact(header_buf)
@@ -156,9 +157,14 @@ impl ArchiveReader {
             .into_vec()
             .iter()
             .map(|cs| {
-                Rc::new(archive::ChunkStore {
-                    store_type: cs.store_type,
-                    store_path: cs.store_path.clone(),
+                let path = Path::new(&cs.store_path).to_path_buf();
+                Rc::new(match cs.store_type {
+                    chunk_dictionary::ChunkStore_StoreType::CHUNK_DIRECTORY => {
+                        archive::ChunkStore::Directory(path)
+                    }
+                    chunk_dictionary::ChunkStore_StoreType::CHUNK_ARCHIVE => {
+                        archive::ChunkStore::Archive(path)
+                    }
                 })
             })
             .collect();
@@ -275,11 +281,19 @@ impl ArchiveReader {
         while !chunks.is_empty() {
             let chunk = chunks.remove(0);
 
-            let prev_chunk_end =
-                group.last().unwrap().store_offset + group.last().unwrap().stored_size;
+            let prev_chunk_end;
+            let prev_chunk_store;
+            {
+                let prev_chunk = group.last().unwrap();
+                prev_chunk_end = prev_chunk.store_offset + prev_chunk.stored_size;
+                prev_chunk_store = &prev_chunk.store;
+            }
 
-            if prev_chunk_end == chunk.store_offset {
-                // Chunk is placed right next to the previous chunk
+            if chunk.store == *prev_chunk_store && prev_chunk_end == chunk.store_offset {
+                // Chunk lives in the same store as the previous and is placed right
+                // next to the previous chunk. Will only be true for chunk data
+                // inside an archive. In a directory store the chunk offset will always
+                // be 0 hence this comparison should not be true.
                 group.push(chunk);
             } else {
                 group_list.push(group);
@@ -320,11 +334,16 @@ impl ArchiveReader {
         for group in grouped_chunks {
             // For each group of chunks
             let start_offset = group[0].store_offset;
+            let group_path = group[0]
+                .store_path()
+                .to_str()
+                .chain_err(|| "failed to get string from path")?
+                .to_string();
             let chunk_sizes: Vec<u64> = group.iter().map(|c| c.stored_size).collect();
             let mut chunk_index = 0;
 
             input
-                .read_in_chunks(start_offset, &chunk_sizes, |archive_data| {
+                .read_in_chunks(&group_path, start_offset, &chunk_sizes, |archive_data| {
                     // For each chunk read from archive
                     let chunk_descriptor = &group[chunk_index];
                     Self::decompress_chunk(

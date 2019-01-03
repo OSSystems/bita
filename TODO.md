@@ -1,22 +1,22 @@
 ### Should
 
+ * Come up with file type names for dictionary and archive (and maybe chunk files)!
+
+ * compress - Should probably take output name without file ending
+
+ * clone - should as default create a local clone of the dictionary and chunk directory/archive and optionally unpack it on the fly (current behavior).
+
+ * unpack - Create this command which unpacks from a local dictionary.
+
  * Allow for fixed block size while chunking.
 
 ### Probably
 
- * On unpack - Add optional flag to avoid writing destination if the unpacked chunk and the destination data is exactly the same. This as the write speed on some block devices is alot lower than the read speed. And to avoid unnecessary block wear when writing large devices/partitions.
-
- * On unpack - Add option for generating an archive/chunk dictionary with chunk data located in the destination file.
+ * On unpack - Add option for generating a chunk dictionary with chunk data located in the destination file.
    This to allow for lookup of old chunks without scanning on next unpack.
 
-### Maybe
+### Next
 
- * Add command 'fetch' which would download and rebuild the source archive locally.
+ * Create 'bita server' which can serve dictionaries and chunk files with less overhead than a regular http server. This as the client could do a single request of all chunks needed instead of a request for each chunk to download.
+   The server could also be used directly when compressing a source file and let the client only upload the chunks not already present on the server.
 
-   If this command should allow to generate a new archive based on local seeds the compressed chunk size might differ (like if we're on different application version than the source using a different compression etc).
-
-   Hence the rebuilt archive header/dictionary might differ in size from the source.
-
-   So to rebuild without creating temporary files (one for headear, one for chunks and concatanate them) we might need to reserve extra space in the header. Other solution or acceptable?
-
- * Implement chunk per file (casync style)

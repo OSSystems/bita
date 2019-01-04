@@ -69,8 +69,8 @@ impl ChunkDescriptor {
             ChunkStore::Directory(ref store_path) => store_path
                 .join(buf_to_hex_str(&self.checksum))
                 .with_extension(
-                    compression_type_to_str(self.compression.get_compression()).to_string()
-                        + ".chunk",
+                    "chunk".to_string()
+                        + compression_type_file_ending(self.compression.get_compression()),
                 ),
             ChunkStore::Archive(ref store_path) => store_path.to_path_buf(),
         }
@@ -91,13 +91,13 @@ impl fmt::Display for chunk_dictionary::ChunkCompression {
     }
 }
 
-pub fn compression_type_to_str(
+pub fn compression_type_file_ending(
     compression_type: chunk_dictionary::ChunkCompression_CompressionType,
 ) -> &'static str {
     match compression_type {
-        chunk_dictionary::ChunkCompression_CompressionType::LZMA => "lzma",
-        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => "zstd",
-        chunk_dictionary::ChunkCompression_CompressionType::NONE => "none",
+        chunk_dictionary::ChunkCompression_CompressionType::LZMA => ".lzma",
+        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => ".zst",
+        chunk_dictionary::ChunkCompression_CompressionType::NONE => "",
     }
 }
 

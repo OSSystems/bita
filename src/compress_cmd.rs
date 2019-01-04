@@ -114,11 +114,10 @@ fn chunk_into_file(
             total_unique_chunk_size += comp_chunk.data.len();
             total_compressed_size += chunk_data.len();
 
-            let compression_type_str = archive::compression_type_to_str(match use_compression {
-                None => chunk_dictionary::ChunkCompression_CompressionType::NONE,
-                Some(ref v) => v.compression,
-            })
-            .to_string();
+            let compression_ending = match use_compression {
+                None => "",
+                Some(ref v) => archive::compression_type_file_ending(v.compression),
+            };
 
             // Store a chunk descriptor which referes to the compressed data
             chunk_descriptors.push(chunk_dictionary::ChunkDescriptor {
@@ -137,7 +136,7 @@ fn chunk_into_file(
                 ChunkStoreType::Directory(ref chunk_dir_path) => {
                     let chunk_file_path = chunk_dir_path
                         .join(buf_to_hex_str(hash))
-                        .with_extension(compression_type_str.to_string() + ".chunk");
+                        .with_extension("chunk".to_string() + compression_ending);
 
                     // TODO: If file exist - overwrite or verify the content and leave as is?
                     let mut chunk_file = OpenOptions::new()

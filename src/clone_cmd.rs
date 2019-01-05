@@ -6,32 +6,103 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::prelude::*;
 use std::io::SeekFrom;
+use std::path::Path;
 use threadpool::ThreadPool;
 
+use archive;
 use archive_reader::*;
 use chunk_dictionary;
 use chunker::Chunker;
 use chunker_utils::*;
 use config::*;
 use errors::*;
+use local_reader_backend::LocalReaderBackend;
 use remote_archive_backend::RemoteReader;
 use std::io::BufWriter;
 use std::os::linux::fs::MetadataExt;
 use string_utils::*;
 
-fn chunk_seed<T, F>(
+#[derive(PartialEq)]
+enum SeedDataVerified {
+    Yes,
+    No,
+}
+
+fn seed_from_stream<T, F>(
     mut seed_input: T,
-    mut chunker: Chunker,
+    chunker: &mut Chunker,
     hash_length: usize,
     chunk_hash_set: &mut HashSet<HashBuf>,
-    mut result: F,
+    mut chunk_data_callback: F,
     pool: &ThreadPool,
 ) -> Result<()>
 where
     T: Read,
-    F: FnMut(&HashBuf, &[u8]),
+    F: FnMut(
+        &HashBuf,
+        SeedDataVerified,
+        chunk_dictionary::ChunkCompression_CompressionType,
+        Vec<u8>,
+    ) -> Result<()>,
+{
+    // Generate strong hash for a chunk
+    let hasher = |data: &[u8]| {
+        let mut hasher = Blake2b::new();
+        hasher.input(data);
+        hasher.result().to_vec()
+    };
+    unique_chunks(
+        &mut seed_input,
+        chunker,
+        hasher,
+        &pool,
+        false,
+        |hashed_chunk| {
+            let hash = &hashed_chunk.hash[0..hash_length].to_vec();
+            if chunk_hash_set.contains(hash) {
+                chunk_data_callback(
+                    hash,
+                    SeedDataVerified::Yes,
+                    chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                    hashed_chunk.data,
+                )
+                .expect("write to output from seed");
+                chunk_hash_set.remove(hash);
+            }
+        },
+    )
+    .chain_err(|| "failed to get unique chunks")?;
+
+    println!(
+        "Chunker - scan time: {}.{:03} s, read time: {}.{:03} s",
+        chunker.scan_time.as_secs(),
+        chunker.scan_time.subsec_millis(),
+        chunker.read_time.as_secs(),
+        chunker.read_time.subsec_millis()
+    );
+    Ok(())
+}
+
+fn seed_from_file<F>(
+    file_path: &Path,
+    mut chunker: Chunker,
+    hash_length: usize,
+    chunk_hash_set: &mut HashSet<HashBuf>,
+    mut chunk_data_callback: F,
+    pool: &ThreadPool,
+) -> Result<()>
+where
+    F: FnMut(
+        &HashBuf,
+        SeedDataVerified,
+        chunk_dictionary::ChunkCompression_CompressionType,
+        Vec<u8>,
+    ) -> Result<()>,
 {
     // Test if the given seed can be read as a bita archive.
+    let mut seed_input = File::open(file_path)
+        .chain_err(|| format!("failed to open seed file ({})", file_path.display()))?;
+
     let mut archive_header = Vec::new();
     match ArchiveReader::try_init(&mut seed_input, &mut archive_header) {
         Err(Error(ErrorKind::NotAnArchive(_), _)) => {
@@ -39,51 +110,34 @@ where
             // far into the chunker.
             chunker.preload(&archive_header);
 
-            // If input is an archive also check if chunker parameter
-            // matches, otherwise error or warn user?
-            // Generate strong hash for a chunk
-            let hasher = |data: &[u8]| {
-                let mut hasher = Blake2b::new();
-                hasher.input(data);
-                hasher.result().to_vec()
-            };
-            unique_chunks(
-                &mut seed_input,
+            seed_from_stream(
+                seed_input,
                 &mut chunker,
-                hasher,
-                &pool,
-                false,
-                |hashed_chunk| {
-                    let hash = &hashed_chunk.hash[0..hash_length].to_vec();
-                    if chunk_hash_set.contains(hash) {
-                        result(hash, &hashed_chunk.data);
-                        chunk_hash_set.remove(hash);
-                    }
-                },
+                hash_length,
+                chunk_hash_set,
+                chunk_data_callback,
+                pool,
             )
-            .chain_err(|| "failed to get unique chunks")?;
-
-            println!(
-                "Chunker - scan time: {}.{:03} s, read time: {}.{:03} s",
-                chunker.scan_time.as_secs(),
-                chunker.scan_time.subsec_millis(),
-                chunker.read_time.as_secs(),
-                chunker.read_time.subsec_millis()
-            );
-            Ok(())
         }
         Err(err) => Err(err),
         Ok(ref mut archive) => {
-            // Is an archive
-            let current_input_offset = archive_header.len();
+            // Close the seed input file and create a remote backend using the file path
+            drop(seed_input);
 
-            archive.read_chunk_stream(
+            let seed_input = LocalReaderBackend::new(file_path);
+
+            // Is an archive
+            archive.read_chunk_data(
                 seed_input,
-                current_input_offset as u64,
                 &chunk_hash_set.clone(),
                 |chunk_descriptor, chunk_data| {
                     // Got chunk data for a matching chunk
-                    result(&chunk_descriptor.checksum, &chunk_data);
+                    chunk_data_callback(
+                        &chunk_descriptor.checksum,
+                        SeedDataVerified::No,
+                        chunk_descriptor.compression.get_compression(),
+                        chunk_data,
+                    )?;
                     chunk_hash_set.remove(&chunk_descriptor.checksum);
                     Ok(())
                 },
@@ -152,36 +206,62 @@ where
 
     let mut total_read_from_seed = 0;
     let mut total_from_archive = 0;
-
+    let mut chunk_data_hasher = Blake2b::new();
     {
         // Closure for writing chunks to output
-        let mut chunk_output = |hash: &HashBuf, chunk_data: &[u8]| {
-            println!(
-                "Chunk '{}', size {} used from seed",
-                HexSlice::new(hash),
-                size_to_str(chunk_data.len()),
-            );
-            total_read_from_seed += chunk_data.len();
-            for offset in archive.chunk_source_offsets(hash) {
+
+        let mut seed_output = |expected_checksum: &HashBuf,
+                               seed_data_verified: SeedDataVerified,
+                               compression: chunk_dictionary::ChunkCompression_CompressionType,
+                               raw_chunk_data: Vec<u8>| {
+            // Got chunk data from seed
+            total_read_from_seed += raw_chunk_data.len();
+
+            // Decompress the raw chunk data
+            let mut chunk_data = vec![];
+            archive::decompress_chunk(compression, raw_chunk_data, &mut chunk_data)?;
+
+            if seed_data_verified == SeedDataVerified::No {
+                // Verify data by hash
+                chunk_data_hasher.input(&chunk_data);
+                let checksum = chunk_data_hasher.result_reset().to_vec();
+                if checksum[..expected_checksum.len()] != expected_checksum[..] {
+                    bail!(
+                        "Chunk hash mismatch (expected: {}, got: {})",
+                        HexSlice::new(expected_checksum),
+                        HexSlice::new(&checksum[0..expected_checksum.len()])
+                    );
+                }
+            }
+
+            for offset in archive.chunk_source_offsets(expected_checksum) {
                 output_file
                     .seek(SeekFrom::Start(offset as u64))
                     .expect("seek output");
                 output_file.write_all(&chunk_data).expect("write output");
             }
+
+            println!(
+                "Chunk '{}', size {} used from seed",
+                HexSlice::new(expected_checksum),
+                size_to_str(chunk_data.len()),
+            );
+
+            Ok(())
         };
 
         // Run input seed files through chunker and use chunks which are in the target file.
         // Start with scanning stdin, if not a tty.
         if !atty::is(Stream::Stdin) {
             let stdin = io::stdin();
-            let seed_file = stdin.lock();
             println!("Scanning stdin for chunks...");
-            chunk_seed(
-                seed_file,
-                chunker.clone(),
+            let mut chunker = chunker.clone();
+            seed_from_stream(
+                stdin.lock(),
+                &mut chunker,
                 archive.hash_length,
                 &mut chunks_left,
-                &mut chunk_output,
+                &mut seed_output,
                 &pool,
             )?;
             println!(
@@ -190,22 +270,20 @@ where
             );
         }
         // Now scan through all given seed files
-        for seed in &config.seed_files {
+        for file_path in &config.seed_files {
             if !chunks_left.is_empty() {
-                let seed_file = File::open(&seed)
-                    .chain_err(|| format!("failed to open seed file ({})", seed))?;
-                println!("Scanning {} for chunks...", seed);
-                chunk_seed(
-                    seed_file,
+                println!("Scanning {} for chunks...", file_path.display());
+                seed_from_file(
+                    file_path,
                     chunker.clone(),
                     archive.hash_length,
                     &mut chunks_left,
-                    &mut chunk_output,
+                    &mut seed_output,
                     &pool,
                 )?;
                 println!(
                     "Reached end of {} ({} chunks missing)",
-                    seed,
+                    file_path.display(),
                     chunks_left.len()
                 );
             }
@@ -214,7 +292,28 @@ where
 
     // Clone rest of the chunks from archive
     let archive_total_read =
-        archive.read_chunk_data(input, &chunks_left, |chunk_descriptor, chunk_data| {
+        archive.read_chunk_data(input, &chunks_left, |chunk_descriptor, raw_chunk_data| {
+            let expected_checksum = &chunk_descriptor.checksum;
+
+            // Decompress the raw chunk data
+            let mut chunk_data = vec![];
+            archive::decompress_chunk(
+                chunk_descriptor.compression.get_compression(),
+                raw_chunk_data,
+                &mut chunk_data,
+            )?;
+
+            // Verify data by hash
+            chunk_data_hasher.input(&chunk_data);
+            let checksum = chunk_data_hasher.result_reset().to_vec();
+            if checksum[..expected_checksum.len()] != expected_checksum[..] {
+                bail!(
+                    "Chunk hash mismatch (expected: {}, got: {})",
+                    HexSlice::new(expected_checksum),
+                    HexSlice::new(&checksum[0..expected_checksum.len()])
+                );
+            }
+
             let offsets = &archive.chunk_source_offsets(&chunk_descriptor.checksum);
             for offset in offsets {
                 total_from_archive += chunk_data.len();
@@ -222,7 +321,7 @@ where
                     .seek(SeekFrom::Start(*offset as u64))
                     .chain_err(|| "failed to seek output file")?;
                 output_file
-                    .write_all(chunk_data)
+                    .write_all(&chunk_data)
                     .chain_err(|| "failed to write output file")?;
             }
 
@@ -259,10 +358,8 @@ pub fn run(config: &CloneConfig, pool: &ThreadPool) -> Result<()> {
         let remote_source = RemoteReader::new(&config.input);
         clone_input(remote_source, config, pool)?;
     } else {
-        let local_file =
-            File::open(&config.input).chain_err(|| format!("unable to open {}", config.input))?;
+        let local_file = LocalReaderBackend::new(&Path::new(&config.input));
         clone_input(local_file, config, pool)?;
     }
-
     Ok(())
 }

@@ -1,6 +1,8 @@
 use blake2::{Blake2b, Digest};
+use lzma::LzmaWriter;
 use protobuf::Message;
 use std::fmt;
+use std::io::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -99,6 +101,34 @@ pub fn compression_type_file_ending(
         chunk_dictionary::ChunkCompression_CompressionType::ZSTD => ".zst",
         chunk_dictionary::ChunkCompression_CompressionType::NONE => "",
     }
+}
+
+// Decompress chunk data, if compressed
+pub fn decompress_chunk(
+    compression: chunk_dictionary::ChunkCompression_CompressionType,
+    archive_data: Vec<u8>,
+    chunk_data: &mut Vec<u8>,
+) -> Result<()> {
+    match compression {
+        chunk_dictionary::ChunkCompression_CompressionType::LZMA => {
+            // Archived chunk is compressed with lzma
+            chunk_data.clear();
+            let mut f = LzmaWriter::new_decompressor(chunk_data).expect("new lzma decompressor");
+            f.write_all(&archive_data).expect("write lzma decompressor");
+            f.finish().expect("finish lzma decompressor");
+        }
+        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => {
+            // Archived chunk is compressed with zstd
+            chunk_data.clear();
+            zstd::stream::copy_decode(&archive_data[..], chunk_data).expect("zstd decompress");
+        }
+        chunk_dictionary::ChunkCompression_CompressionType::NONE => {
+            // Archived chunk is NOT compressed
+            *chunk_data = archive_data;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn build_header(dictionary: &chunk_dictionary::ChunkDictionary) -> Result<Vec<u8>> {

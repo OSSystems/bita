@@ -20,7 +20,7 @@ mod clone_cmd;
 mod compress_cmd;
 mod config;
 mod errors;
-mod file_archive_backend;
+mod local_reader_backend;
 mod ordered_mpsc;
 mod remote_archive_backend;
 mod string_utils;
@@ -242,7 +242,7 @@ fn parse_opts() -> Result<Config> {
         let seed_files = matches
             .values_of("seed")
             .unwrap_or_default()
-            .map(|s| s.to_string())
+            .map(|s| Path::new(s).to_path_buf())
             .collect();
         Ok(Config::Clone(CloneConfig {
             base: base_config,

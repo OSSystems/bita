@@ -1,5 +1,6 @@
 use curl::easy::Easy;
 use std::io;
+use std::path::Path;
 
 use archive_reader::ArchiveBackend;
 use errors::*;
@@ -17,8 +18,14 @@ impl RemoteReader {
         let url_parts: Vec<&str> = url.split('/').collect();
         let url_parts_len = url_parts.len();
         let dictionary_file_name = url_parts[url_parts_len - 1].to_string();
+
         let base_url: Vec<&str> = url_parts.into_iter().take(url_parts_len - 1).collect();
         let base_url = base_url.join("/");
+        let base_url = if !base_url.is_empty() {
+            base_url + "/"
+        } else {
+            base_url
+        };
 
         println!(
             "base_url='{}', dictionary_file_name='{}'",
@@ -45,19 +52,22 @@ impl io::Read for RemoteReader {
         // Regular read operation will read from the dictionary file
         let read_offset = self.read_offset;
         let dictionary_file_name = self.dictionary_file_name.clone();
-        self.read_at(&dictionary_file_name, read_offset, buf)?;
+        self.read_at(&Path::new(&dictionary_file_name), read_offset, buf)?;
         self.read_offset += buf.len() as u64;
         Ok(buf.len())
     }
 }
 
 impl ArchiveBackend for RemoteReader {
-    fn read_at(&mut self, store_path: &str, offset: u64, buf: &mut [u8]) -> Result<()> {
+    fn read_at(&mut self, store_path: &Path, offset: u64, buf: &mut [u8]) -> Result<()> {
         if buf.is_empty() {
             return Ok(());
         }
 
-        let url = self.base_url.clone() + "/" + store_path;
+        let url = self.base_url.clone()
+            + store_path
+                .to_str()
+                .chain_err(|| "failed to convert path to string")?;
         println!("Fetch from '{}'...", url);
         let end_offset = offset + (buf.len() - 1) as u64;
         let mut data = Vec::new();
@@ -90,7 +100,7 @@ impl ArchiveBackend for RemoteReader {
 
     fn read_in_chunks<F: FnMut(Vec<u8>) -> Result<()>>(
         &mut self,
-        store_path: &str,
+        store_path: &Path,
         start_offset: u64,
         chunk_sizes: &[u64],
         mut chunk_callback: F,
@@ -98,7 +108,10 @@ impl ArchiveBackend for RemoteReader {
         let tot_size: u64 = chunk_sizes.iter().sum();
 
         // Create get request
-        let url = self.base_url.clone() + "/" + store_path;
+        let url = self.base_url.clone()
+            + store_path
+                .to_str()
+                .chain_err(|| "failed to convert path to string")?;
         println!("Fetch from '{}'...", url);
         let mut chunk_buf: Vec<u8> = vec![];
         let mut chunk_index = 0;

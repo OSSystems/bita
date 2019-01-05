@@ -63,7 +63,9 @@ impl ArchiveBackend for RemoteReader {
         let mut data = Vec::new();
 
         self.handle.url(&url).chain_err(|| "unable to set url")?;
-
+        self.handle
+            .fail_on_error(true)
+            .chain_err(|| "unable to set fail on error option")?;
         self.handle
             .range(&format!("{}-{}", offset, end_offset))
             .chain_err(|| "unable to set range")?;
@@ -104,6 +106,9 @@ impl ArchiveBackend for RemoteReader {
         let end_offset = start_offset + tot_size - 1;
 
         self.handle.url(&url).chain_err(|| "unable to set url")?;
+        self.handle
+            .fail_on_error(true)
+            .chain_err(|| "unable to set fail on error option")?;
         self.handle
             .range(&format!("{}-{}", start_offset, end_offset))
             .chain_err(|| "unable to set range")?;

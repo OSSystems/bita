@@ -23,6 +23,7 @@ mod errors;
 mod local_reader_backend;
 mod ordered_mpsc;
 mod remote_archive_backend;
+mod seed;
 mod string_utils;
 
 use std::process;
@@ -45,7 +46,6 @@ fn parse_size(size_str: &str) -> usize {
         return size_val;
     }
     match size_unit.as_str() {
-        "TiB" => 1024 * 1024 * 1024 * 1024 * size_val,
         "GiB" => 1024 * 1024 * 1024 * size_val,
         "MiB" => 1024 * 1024 * size_val,
         "KiB" => 1024 * size_val,

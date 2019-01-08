@@ -27,11 +27,6 @@ impl RemoteReader {
             base_url
         };
 
-        println!(
-            "base_url='{}', dictionary_file_name='{}'",
-            base_url, dictionary_file_name
-        );
-
         RemoteReader {
             dictionary_file_name: dictionary_file_name.to_string(),
             base_url,
@@ -68,7 +63,7 @@ impl ArchiveBackend for RemoteReader {
             + store_path
                 .to_str()
                 .chain_err(|| "failed to convert path to string")?;
-        println!("Fetch from '{}'...", url);
+
         let end_offset = offset + (buf.len() - 1) as u64;
         let mut data = Vec::new();
 
@@ -112,7 +107,7 @@ impl ArchiveBackend for RemoteReader {
             + store_path
                 .to_str()
                 .chain_err(|| "failed to convert path to string")?;
-        println!("Fetch from '{}'...", url);
+
         let mut chunk_buf: Vec<u8> = vec![];
         let mut chunk_index = 0;
         let mut total_read = 0;

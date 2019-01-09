@@ -159,6 +159,24 @@ fn parse_opts() -> Result<Config> {
                         .long("seed")
                         .help("Local file to use as seed while cloning.")
                         .multiple(true),
+                )
+                .arg(
+                    Arg::with_name("compression-level")
+                        .long("compression-level")
+                        .value_name("LEVEL")
+                        .help("Set the chunk data compression level (1-19) [default: 6]."),
+                )
+                .arg(
+                    Arg::with_name("compression")
+                        .long("compression")
+                        .value_name("TYPE")
+                        .help("Set the chunk data compression type (LZMA, ZSTD, NONE) [default: LZMA]."),
+                ).arg(
+                    Arg::with_name("unpack")
+                        .long("unpack")
+                        .help("Unpack the remote archive on the fly instead of creating a copy.")
+                        .conflicts_with("compression")
+                        .conflicts_with("compression-level")
                 ),
         )
         .get_matches();
@@ -198,16 +216,19 @@ fn parse_opts() -> Result<Config> {
         let max_chunk_size = parse_size(matches.value_of("max-chunk-size").unwrap_or("16MiB"));
         let hash_window_size = parse_size(matches.value_of("buzhash-window").unwrap_or("16B"));
         let hash_length = matches.value_of("hash-length").unwrap_or("64");
-        let compression_level = matches
-            .value_of("compression-level")
-            .unwrap_or("6")
-            .parse()
-            .chain_err(|| "invalid compression level value")?;
-        let compression = match matches.value_of("compression").unwrap_or("LZMA") {
-            "LZMA" => chunk_dictionary::ChunkCompression_CompressionType::LZMA,
-            "ZSTD" => chunk_dictionary::ChunkCompression_CompressionType::ZSTD,
-            "NONE" => chunk_dictionary::ChunkCompression_CompressionType::NONE,
-            _ => bail!("invalid compression"),
+
+        let compression = Compression {
+            level: matches
+                .value_of("compression-level")
+                .unwrap_or("6")
+                .parse()
+                .chain_err(|| "invalid compression level value")?,
+            algorithm: match matches.value_of("compression").unwrap_or("LZMA") {
+                "LZMA" | "lzma" => chunk_dictionary::ChunkCompression_CompressionType::LZMA,
+                "ZSTD" | "zstd" => chunk_dictionary::ChunkCompression_CompressionType::ZSTD,
+                "NONE" | "none" => chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                _ => bail!("invalid compression"),
+            },
         };
 
         let chunk_filter_bits = avg_chunk_size.leading_zeros();
@@ -217,7 +238,7 @@ fn parse_opts() -> Result<Config> {
         if max_chunk_size < avg_chunk_size {
             bail!("max-chunk-size < avg-chunk-size");
         }
-        if compression_level < 1 || compression_level > 19 {
+        if compression.level < 1 || compression.level > 19 {
             bail!("compression level not within range");
         }
 
@@ -233,23 +254,45 @@ fn parse_opts() -> Result<Config> {
             min_chunk_size,
             max_chunk_size,
             hash_window_size,
-            compression_level,
             compression,
         }))
     } else if let Some(matches) = matches.subcommand_matches("clone") {
         let input = matches.value_of("INPUT").unwrap();
-        let output = matches.value_of("OUTPUT").unwrap_or("");
+        let output_path = Path::new(matches.value_of("OUTPUT").unwrap_or("")).to_path_buf();
         let seed_files = matches
             .values_of("seed")
             .unwrap_or_default()
             .map(|s| Path::new(s).to_path_buf())
             .collect();
+
+        let unpack = matches.is_present("unpack");
+
+        let compression = Compression {
+            level: matches
+                .value_of("compression-level")
+                .unwrap_or("6")
+                .parse()
+                .chain_err(|| "invalid compression level value")?,
+            algorithm: match matches.value_of("compression").unwrap_or("LZMA") {
+                "LZMA" | "lzma" => chunk_dictionary::ChunkCompression_CompressionType::LZMA,
+                "ZSTD" | "zstd" => chunk_dictionary::ChunkCompression_CompressionType::ZSTD,
+                "NONE" | "none" => chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                _ => bail!("invalid compression"),
+            },
+        };
+        if compression.level < 1 || compression.level > 19 {
+            bail!("compression level not within range");
+        }
+
         Ok(Config::Clone(CloneConfig {
             base: base_config,
             input: input.to_string(),
-            output: output.to_string(),
+            output_path,
             seed_files,
-            seed_stdin: false,
+            output_type: match unpack {
+                true => CloneOutput::Unpack,
+                false => CloneOutput::Archive(compression),
+            },
         }))
     } else {
         println!("Unknown command");

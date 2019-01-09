@@ -13,6 +13,12 @@ pub enum ChunkStoreType {
 }
 
 #[derive(Debug)]
+pub struct Compression {
+    pub level: u32,
+    pub algorithm: chunk_dictionary::ChunkCompression_CompressionType,
+}
+
+#[derive(Debug)]
 pub struct CompressConfig {
     pub base: BaseConfig,
 
@@ -25,17 +31,23 @@ pub struct CompressConfig {
     pub min_chunk_size: usize,
     pub max_chunk_size: usize,
     pub hash_window_size: usize,
-    pub compression_level: u32,
-    pub compression: chunk_dictionary::ChunkCompression_CompressionType,
+    pub compression: Compression,
 }
+
+#[derive(Debug)]
+pub enum CloneOutput {
+    Archive(Compression),
+    Unpack,
+}
+
 #[derive(Debug)]
 pub struct CloneConfig {
     pub base: BaseConfig,
 
     pub input: String,
-    pub output: String,
+    pub output_path: PathBuf,
     pub seed_files: Vec<PathBuf>,
-    pub seed_stdin: bool,
+    pub output_type: CloneOutput,
 }
 
 #[derive(Debug)]

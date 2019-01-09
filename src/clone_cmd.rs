@@ -2,10 +2,13 @@ use atty::Stream;
 use blake2::{Blake2b, Digest};
 use buzhash::BuzHash;
 use std::collections::HashSet;
+use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
+use std::io::BufWriter;
 use std::io::SeekFrom;
+use std::os::linux::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use threadpool::ThreadPool;
 
@@ -19,9 +22,78 @@ use errors::*;
 use local_reader_backend::LocalReaderBackend;
 use remote_archive_backend::RemoteReader;
 use seed;
-use std::io::BufWriter;
-use std::os::linux::fs::MetadataExt;
 use string_utils::*;
+
+struct CloneOutput {
+    chunk_counter: usize,
+    chunk_data_hasher: blake2::Blake2b,
+}
+
+impl CloneOutput {
+    fn new() -> Self {
+        CloneOutput {
+            chunk_counter: 0,
+            chunk_data_hasher: Blake2b::new(),
+        }
+    }
+
+    // Write chunk to output. For now output is always a file.
+    fn write_chunk(
+        &mut self,
+        archive: &ArchiveReader,
+        expected_checksum: &HashBuf,
+        chunk_is_from_seed: Option<seed::DataVerified>,
+        compression: chunk_dictionary::ChunkCompression_CompressionType,
+        raw_chunk_data: Vec<u8>,
+        output_file: &mut BufWriter<File>,
+    ) -> Result<()> {
+        // Decompress the raw chunk data
+        let raw_size = raw_chunk_data.len();
+        let mut chunk_data = vec![];
+
+        archive::decompress_chunk(compression, raw_chunk_data, &mut chunk_data)?;
+        self.chunk_counter += 1;
+
+        if chunk_is_from_seed == Some(seed::DataVerified::Yes) {
+            // Chunk data is from seed and has already been verified
+        } else {
+            // Chunk data is not verified
+            self.chunk_data_hasher.input(&chunk_data);
+            let checksum = self.chunk_data_hasher.result_reset().to_vec();
+            if checksum[..expected_checksum.len()] != expected_checksum[..] {
+                bail!(
+                    "Chunk hash mismatch (expected: {}, got: {})",
+                    HexSlice::new(expected_checksum),
+                    HexSlice::new(&checksum[0..expected_checksum.len()])
+                );
+            }
+        }
+
+        // Write the chunk to output file or re-compress to new archive
+        let source_offsets = archive.chunk_source_offsets(expected_checksum);
+        for offset in &source_offsets {
+            output_file
+                .seek(SeekFrom::Start(*offset as u64))
+                .expect("seek output");
+            output_file.write_all(&chunk_data).expect("write output");
+        }
+
+        println!(
+            "Chunk {} '{}' from {} of size {} decompressed to {}",
+            //archive.num_chunks(),
+            self.chunk_counter,
+            HexSlice::new(expected_checksum),
+            match chunk_is_from_seed {
+                Some(_) => "seed",
+                None => "archive",
+            },
+            size_to_str(raw_size),
+            size_to_str(chunk_data.len() * source_offsets.len()),
+        );
+
+        Ok(())
+    }
+}
 
 // Scan seeds and clone matching chunks
 fn clone_from_seeds<F>(
@@ -106,8 +178,13 @@ where
         .write(true)
         .create(config.base.force_create)
         .create_new(!config.base.force_create)
-        .open(&config.output)
-        .chain_err(|| format!("failed to open output file ({})", config.output))?;
+        .open(&config.output_path)
+        .chain_err(|| {
+            format!(
+                "failed to open output file ({})",
+                config.output_path.display()
+            )
+        })?;
 
     // Check if the given output file is a regular file or block device.
     // If it is a block device we should check its size against the target size before
@@ -138,60 +215,7 @@ where
     }
 
     let mut output_file = BufWriter::new(output_file);
-    let mut chunk_data_hasher = Blake2b::new();
-
-    // Chunk output closure
-    let mut chunk_counter = 0;
-    let mut chunk_output = |expected_checksum: &HashBuf,
-                            chunk_is_from_seed: Option<seed::DataVerified>,
-                            compression: chunk_dictionary::ChunkCompression_CompressionType,
-                            raw_chunk_data: Vec<u8>| {
-        // Decompress the raw chunk data
-        let raw_size = raw_chunk_data.len();
-        let mut chunk_data = vec![];
-
-        archive::decompress_chunk(compression, raw_chunk_data, &mut chunk_data)?;
-        chunk_counter += 1;
-
-        if chunk_is_from_seed == Some(seed::DataVerified::Yes) {
-            // Chunk data is from seed and has already been verified
-        } else {
-            // Chunk data is not verified
-            chunk_data_hasher.input(&chunk_data);
-            let checksum = chunk_data_hasher.result_reset().to_vec();
-            if checksum[..expected_checksum.len()] != expected_checksum[..] {
-                bail!(
-                    "Chunk hash mismatch (expected: {}, got: {})",
-                    HexSlice::new(expected_checksum),
-                    HexSlice::new(&checksum[0..expected_checksum.len()])
-                );
-            }
-        }
-
-        // Write the chunk to output filex
-        let source_offsets = archive.chunk_source_offsets(expected_checksum);
-        for offset in &source_offsets {
-            output_file
-                .seek(SeekFrom::Start(*offset as u64))
-                .expect("seek output");
-            output_file.write_all(&chunk_data).expect("write output");
-        }
-
-        println!(
-            "Chunk {} '{}' from {} of size {} decompressed to {}",
-            //archive.num_chunks(),
-            chunk_counter,
-            HexSlice::new(expected_checksum),
-            match chunk_is_from_seed {
-                Some(_) => "seed",
-                None => "archive",
-            },
-            size_to_str(raw_size),
-            size_to_str(chunk_data.len() * source_offsets.len()),
-        );
-
-        Ok(())
-    };
+    let mut output = CloneOutput::new();
 
     let mut bytes_from_seed = 0;
 
@@ -207,12 +231,13 @@ where
          raw_chunk_data: Vec<u8>| {
             // Got chunk data from seed
             bytes_from_seed += raw_chunk_data.len();
-
-            chunk_output(
+            output.write_chunk(
+                &archive,
                 expected_checksum,
                 Some(chunk_data_verified),
                 compression,
                 raw_chunk_data,
+                &mut output_file,
             )
         },
     )?;
@@ -222,11 +247,13 @@ where
         archive.read_chunk_data(input, &chunks_left, |chunk_descriptor, raw_chunk_data| {
             let expected_checksum = &chunk_descriptor.checksum;
 
-            chunk_output(
+            output.write_chunk(
+                &archive,
                 expected_checksum,
                 None,
                 chunk_descriptor.compression.get_compression(),
                 raw_chunk_data,
+                &mut output_file,
             )
         })?;
 

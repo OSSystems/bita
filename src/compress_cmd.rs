@@ -39,12 +39,12 @@ fn chunk_into_file(
     );
 
     let mut compression = chunk_dictionary::ChunkCompression::new();
-    compression.set_compression(config.compression);
-    compression.set_compression_level(config.compression_level);
+    compression.set_compression(config.compression.algorithm);
+    compression.set_compression_level(config.compression.level);
 
     // Compress a chunk
-    let compression_level = config.compression_level;
-    let compression_type = config.compression;
+    let compression_level = config.compression.level;
+    let compression_type = config.compression.algorithm;
     let chunk_compressor = move |data: &[u8]| -> Vec<u8> {
         match compression_type {
             chunk_dictionary::ChunkCompression_CompressionType::LZMA => {

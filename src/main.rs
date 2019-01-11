@@ -29,9 +29,9 @@ mod string_utils;
 use std::process;
 use threadpool::ThreadPool;
 
+use crate::config::*;
+use crate::errors::*;
 use clap::{App, Arg, SubCommand};
-use config::*;
-use errors::*;
 use std::path::Path;
 
 pub const BUZHASH_SEED: u32 = 0x1032_4195;
@@ -289,9 +289,10 @@ fn parse_opts() -> Result<Config> {
             input: input.to_string(),
             output_path,
             seed_files,
-            output_type: match unpack {
-                true => CloneOutput::Unpack,
-                false => CloneOutput::Archive(compression),
+            output_type: if unpack {
+                CloneOutput::Unpack
+            } else {
+                CloneOutput::StoreDirectory(compression)
             },
         }))
     } else {

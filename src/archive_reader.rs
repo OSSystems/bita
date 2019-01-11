@@ -1,15 +1,15 @@
 use blake2::{Blake2b, Digest};
-use chunker_utils::HashBuf;
+use crate::chunker_utils::HashBuf;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::prelude::*;
 use std::path::Path;
 use std::rc::Rc;
-use string_utils::*;
+use crate::string_utils::*;
 
-use archive;
-use chunk_dictionary;
-use errors::*;
+use crate::archive;
+use crate::chunk_dictionary;
+use crate::errors::*;
 
 #[derive(Debug)]
 pub struct ArchiveReader {

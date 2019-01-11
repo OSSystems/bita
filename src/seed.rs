@@ -4,12 +4,12 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 
-use archive_reader::*;
-use chunk_dictionary;
-use chunker::Chunker;
-use chunker_utils::*;
-use errors::*;
-use local_reader_backend::LocalReaderBackend;
+use crate::archive_reader::*;
+use crate::chunk_dictionary;
+use crate::chunker::Chunker;
+use crate::chunker_utils::*;
+use crate::errors::*;
+use crate::local_reader_backend::LocalReaderBackend;
 use threadpool::ThreadPool;
 
 #[derive(PartialEq)]

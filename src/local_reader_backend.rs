@@ -5,8 +5,8 @@ use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 
-use archive_reader::*;
-use errors::*;
+use crate::archive_reader::*;
+use crate::errors::*;
 
 pub struct LocalReaderBackend {
     base_path: PathBuf,

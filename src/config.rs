@@ -1,4 +1,4 @@
-use chunk_dictionary;
+use crate::chunk_dictionary;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ pub struct CompressConfig {
 
 #[derive(Debug)]
 pub enum CloneOutput {
-    Archive(Compression),
+    StoreDirectory(Compression),
     Unpack,
 }
 

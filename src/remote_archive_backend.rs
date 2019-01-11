@@ -2,8 +2,8 @@ use curl::easy::Easy;
 use std::io;
 use std::path::Path;
 
-use archive_reader::ArchiveBackend;
-use errors::*;
+use crate::archive_reader::ArchiveBackend;
+use crate::errors::*;
 
 pub struct RemoteReader {
     base_url: String,

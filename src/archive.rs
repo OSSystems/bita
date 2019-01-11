@@ -6,10 +6,10 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use chunk_dictionary;
-use chunker_utils::HashBuf;
-use errors::*;
-use string_utils::*;
+use crate::chunk_dictionary;
+use crate::chunker_utils::HashBuf;
+use crate::errors::*;
+use crate::string_utils::*;
 
 impl fmt::Display for chunk_dictionary::ChunkDictionary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

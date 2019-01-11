@@ -1,6 +1,6 @@
+use crate::buzhash::BuzHash;
 use atty::Stream;
 use blake2::{Blake2b, Digest};
-use buzhash::BuzHash;
 use std::collections::HashSet;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -12,17 +12,17 @@ use std::os::linux::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use threadpool::ThreadPool;
 
-use archive;
-use archive_reader::*;
-use chunk_dictionary;
-use chunker::Chunker;
-use chunker_utils::*;
-use config::*;
-use errors::*;
-use local_reader_backend::LocalReaderBackend;
-use remote_archive_backend::RemoteReader;
-use seed;
-use string_utils::*;
+use crate::archive;
+use crate::archive_reader::*;
+use crate::chunk_dictionary;
+use crate::chunker::Chunker;
+use crate::chunker_utils::*;
+use crate::config::*;
+use crate::errors::*;
+use crate::local_reader_backend::LocalReaderBackend;
+use crate::remote_archive_backend::RemoteReader;
+use crate::seed;
+use crate::string_utils::*;
 
 struct CloneOutput {
     chunk_counter: usize,
@@ -41,8 +41,8 @@ impl CloneOutput {
     fn write_chunk(
         &mut self,
         archive: &ArchiveReader,
-        expected_checksum: &HashBuf,
-        chunk_is_from_seed: Option<seed::DataVerified>,
+        expected_checksum: &[u8],
+        chunk_is_from_seed: &Option<seed::DataVerified>,
         compression: chunk_dictionary::ChunkCompression_CompressionType,
         raw_chunk_data: Vec<u8>,
         output_file: &mut BufWriter<File>,
@@ -54,7 +54,7 @@ impl CloneOutput {
         archive::decompress_chunk(compression, raw_chunk_data, &mut chunk_data)?;
         self.chunk_counter += 1;
 
-        if chunk_is_from_seed == Some(seed::DataVerified::Yes) {
+        if *chunk_is_from_seed == Some(seed::DataVerified::Yes) {
             // Chunk data is from seed and has already been verified
         } else {
             // Chunk data is not verified
@@ -117,7 +117,7 @@ where
         archive.chunk_filter_bits,
         archive.min_chunk_size,
         archive.max_chunk_size,
-        BuzHash::new(archive.hash_window_size as usize, ::BUZHASH_SEED),
+        BuzHash::new(archive.hash_window_size as usize, crate::BUZHASH_SEED),
     );
 
     // Run input seed files through chunker and use chunks which are in the target file.
@@ -234,7 +234,7 @@ where
             output.write_chunk(
                 &archive,
                 expected_checksum,
-                Some(chunk_data_verified),
+                &Some(chunk_data_verified),
                 compression,
                 raw_chunk_data,
                 &mut output_file,
@@ -250,7 +250,7 @@ where
             output.write_chunk(
                 &archive,
                 expected_checksum,
-                None,
+                &None,
                 chunk_descriptor.compression.get_compression(),
                 raw_chunk_data,
                 &mut output_file,

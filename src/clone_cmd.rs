@@ -47,6 +47,7 @@ impl ChunkTransformer {
         chunk_is_from_seed: &Option<seed::DataVerified>,
         compression: Compression,
         raw_chunk_data: Vec<u8>,
+        target: CloneTarget,
     ) -> Result<()> {
         // Decompress the raw chunk data
 
@@ -76,6 +77,15 @@ impl ChunkTransformer {
                     );
                 }
             }
+
+            // Recompress the chunk if target is to rebuild a chunk archive
+            chunk_data = match target {
+                CloneTarget::StoreDirectory(ref compression)
+                | CloneTarget::StoreArchive(ref compression) => {
+                    compression.compress(&chunk_data).expect("recompress chunk")
+                }
+                CloneTarget::Unpack => chunk_data,
+            };
 
             // Give chunk back to main thread for further processing
             chunk_tx
@@ -254,6 +264,7 @@ where
                 &Some(chunk_data_verified),
                 compression,
                 raw_chunk_data,
+                config.target.clone(),
             )?;
             transformer.write(&archive, &mut output_file)
         },
@@ -270,6 +281,7 @@ where
                 &None,
                 chunk_descriptor.compression,
                 raw_chunk_data,
+                config.target.clone(),
             )?;
             transformer.write(&archive, &mut output_file)
         })?;

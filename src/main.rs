@@ -291,10 +291,10 @@ fn parse_opts() -> Result<Config> {
             input: input.to_string(),
             output_path,
             seed_files,
-            output_type: if unpack {
-                CloneOutput::Unpack
+            target: if unpack {
+                CloneTarget::Unpack
             } else {
-                CloneOutput::StoreDirectory(compression)
+                CloneTarget::StoreDirectory(compression)
             },
         }))
     } else {

@@ -43,7 +43,7 @@ pub struct CloneConfig {
     pub input: String,
     pub output_path: PathBuf,
     pub seed_files: Vec<PathBuf>,
-    pub output_type: CloneOutput,
+    pub target: CloneTarget,
 }
 
 #[derive(Debug)]

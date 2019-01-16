@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use crate::chunk_dictionary;
 use crate::chunker_utils::HashBuf;
+use crate::compression::Compression;
 use crate::errors::*;
 use crate::string_utils::*;
 
@@ -59,7 +60,7 @@ pub enum ChunkStore {
 pub struct ChunkDescriptor {
     pub checksum: HashBuf,
     pub size: u64,
-    pub compression: chunk_dictionary::ChunkCompression,
+    pub compression: Compression,
     pub stored_size: u64,
     pub store_offset: u64,
     pub store: Rc<ChunkStore>,
@@ -70,10 +71,7 @@ impl ChunkDescriptor {
         match *self.store {
             ChunkStore::Directory(ref store_path) => store_path
                 .join(buf_to_hex_str(&self.checksum))
-                .with_extension(
-                    "chunk".to_string()
-                        + compression_type_file_ending(self.compression.get_compression()),
-                ),
+                .with_extension("chunk".to_string() + self.compression.file_extension()),
             ChunkStore::Archive(ref store_path) => store_path.to_path_buf(),
         }
     }
@@ -93,36 +91,26 @@ impl fmt::Display for chunk_dictionary::ChunkCompression {
     }
 }
 
-pub fn compression_type_file_ending(
-    compression_type: chunk_dictionary::ChunkCompression_CompressionType,
-) -> &'static str {
-    match compression_type {
-        chunk_dictionary::ChunkCompression_CompressionType::LZMA => ".lzma",
-        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => ".zst",
-        chunk_dictionary::ChunkCompression_CompressionType::NONE => "",
-    }
-}
-
 // Decompress chunk data, if compressed
 pub fn decompress_chunk(
-    compression: chunk_dictionary::ChunkCompression_CompressionType,
+    compression: Compression,
     archive_data: Vec<u8>,
     chunk_data: &mut Vec<u8>,
 ) -> Result<()> {
     match compression {
-        chunk_dictionary::ChunkCompression_CompressionType::LZMA => {
+        Compression::LZMA(_) => {
             // Archived chunk is compressed with lzma
             chunk_data.clear();
             let mut f = LzmaWriter::new_decompressor(chunk_data).expect("new lzma decompressor");
             f.write_all(&archive_data).expect("write lzma decompressor");
             f.finish().expect("finish lzma decompressor");
         }
-        chunk_dictionary::ChunkCompression_CompressionType::ZSTD => {
+        Compression::ZSTD(_) => {
             // Archived chunk is compressed with zstd
             chunk_data.clear();
             zstd::stream::copy_decode(&archive_data[..], chunk_data).expect("zstd decompress");
         }
-        chunk_dictionary::ChunkCompression_CompressionType::NONE => {
+        Compression::None => {
             // Archived chunk is NOT compressed
             *chunk_data = archive_data;
         }

@@ -14,9 +14,9 @@ use threadpool::ThreadPool;
 
 use crate::archive;
 use crate::archive_reader::*;
-use crate::chunk_dictionary;
 use crate::chunker::{Chunker, ChunkerParams};
 use crate::chunker_utils::*;
+use crate::compression::Compression;
 use crate::config::*;
 use crate::errors::*;
 use crate::local_reader_backend::LocalReaderBackend;
@@ -45,7 +45,7 @@ impl ChunkTransformer {
         pool: &ThreadPool,
         expected_checksum: &[u8],
         chunk_is_from_seed: &Option<seed::DataVerified>,
-        compression: chunk_dictionary::ChunkCompression_CompressionType,
+        compression: Compression,
         raw_chunk_data: Vec<u8>,
     ) -> Result<()> {
         // Decompress the raw chunk data
@@ -70,12 +70,14 @@ impl ChunkTransformer {
                 let checksum = chunk_hasher.result().to_vec();
                 if checksum[..expected_checksum.len()] != expected_checksum[..] {
                     panic!(
-                        "Chunk hash mismatch (expected: {}, got: {})",
+                        "Chunk checksum mismatch (expected: {}, got: {})",
                         HexSlice::new(&expected_checksum),
                         HexSlice::new(&checksum[0..expected_checksum.len()])
                     );
                 }
             }
+
+            // Give chunk back to main thread for further processing
             chunk_tx
                 .send((chunk_is_from_seed, expected_checksum.to_vec(), chunk_data))
                 .expect("pass chunk forward");
@@ -126,12 +128,7 @@ fn clone_from_seeds<F>(
     mut seed_output: F,
 ) -> Result<()>
 where
-    F: FnMut(
-        &HashBuf,
-        seed::DataVerified,
-        chunk_dictionary::ChunkCompression_CompressionType,
-        Vec<u8>,
-    ) -> Result<()>,
+    F: FnMut(&HashBuf, seed::DataVerified, Compression, Vec<u8>) -> Result<()>,
 {
     // Setup chunker to use when chunking seed input
     let chunker_params = ChunkerParams::new(
@@ -247,7 +244,7 @@ where
         &mut chunks_left,
         |expected_checksum: &HashBuf,
          chunk_data_verified: seed::DataVerified,
-         compression: chunk_dictionary::ChunkCompression_CompressionType,
+         compression: Compression,
          raw_chunk_data: Vec<u8>| {
             // Got chunk data from seed
             bytes_from_seed += raw_chunk_data.len();
@@ -271,7 +268,7 @@ where
                 pool,
                 expected_checksum,
                 &None,
-                chunk_descriptor.compression.get_compression(),
+                chunk_descriptor.compression,
                 raw_chunk_data,
             )?;
             transformer.write(&archive, &mut output_file)

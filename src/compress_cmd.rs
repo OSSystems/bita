@@ -1,7 +1,6 @@
 use crate::string_utils::*;
 use atty::Stream;
 use blake2::{Blake2b, Digest};
-use lzma::LzmaWriter;
 use protobuf::{RepeatedField, SingularPtrField};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -13,10 +12,10 @@ use crate::buzhash::BuzHash;
 use crate::chunk_dictionary;
 use crate::chunker::*;
 use crate::chunker_utils::*;
-use crate::config::*;
+use crate::compression::Compression;
+use crate::config::{ChunkStoreType, CompressConfig};
 use crate::errors::*;
 
-// Ok((file_size, file_hash, chunks, chunk_descriptors))
 struct ChunkFileDescriptor {
     total_file_size: usize,
     file_hash: HashBuf,
@@ -37,35 +36,10 @@ fn chunk_into_file(
         BuzHash::new(config.hash_window_size as usize, crate::BUZHASH_SEED),
     );
 
-    let mut compression = chunk_dictionary::ChunkCompression::new();
-    compression.set_compression(config.compression.algorithm);
-    compression.set_compression_level(config.compression.level);
-
     // Compress a chunk
-    let compression_level = config.compression.level;
-    let compression_type = config.compression.algorithm;
-    let chunk_compressor = move |data: &[u8]| -> Vec<u8> {
-        match compression_type {
-            chunk_dictionary::ChunkCompression_CompressionType::LZMA => {
-                let mut result = vec![];
-                {
-                    let mut f = LzmaWriter::new_compressor(&mut result, compression_level)
-                        .expect("new lzma compressor");
-                    f.write_all(data).expect("write compressor");
-                    f.finish().expect("finish compressor");
-                }
-                result
-            }
-            chunk_dictionary::ChunkCompression_CompressionType::ZSTD => {
-                let mut result = vec![];
-                let mut data = data.to_vec();
-                zstd::stream::copy_encode(&data[..], &mut result, compression_level as i32)
-                    .expect("zstd compressor");
-                result
-            }
-            chunk_dictionary::ChunkCompression_CompressionType::NONE => data.to_vec(),
-        }
-    };
+    let compression = config.compression;
+    let chunk_compressor =
+        move |data: &[u8]| -> Vec<u8> { compression.compress(data).expect("compress data") };
 
     // Generate strong hash for a chunk
     fn hasher(data: &[u8]) -> Vec<u8> {
@@ -90,11 +64,11 @@ fn chunk_into_file(
             let use_compression = if comp_chunk.cdata.len() < comp_chunk.data.len() {
                 // Use the compressed data
                 chunk_data = &comp_chunk.cdata;
-                Some(compression.clone())
+                config.compression
             } else {
                 // Compressed chunk bigger than raw - Use raw
                 chunk_data = &comp_chunk.data;
-                None
+                Compression::None
             };
             println!(
                 "Chunk {}, '{}', offset: {}, size: {}, compressed to: {}, compression: {}",
@@ -103,20 +77,12 @@ fn chunk_into_file(
                 comp_chunk.offset,
                 size_to_str(comp_chunk.data.len()),
                 size_to_str(comp_chunk.cdata.len()),
-                match use_compression {
-                    None => "none".to_owned(),
-                    Some(ref v) => format!("{}", v),
-                }
+                use_compression
             );
 
             total_unique_chunks += 1;
             total_unique_chunk_size += comp_chunk.data.len();
             total_compressed_size += chunk_data.len();
-
-            let compression_ending = match use_compression {
-                None => "",
-                Some(ref v) => archive::compression_type_file_ending(v.compression),
-            };
 
             // Store a chunk descriptor which referes to the compressed data
             chunk_descriptors.push(chunk_dictionary::ChunkDescriptor {
@@ -125,7 +91,7 @@ fn chunk_into_file(
                 stored_size: chunk_data.len() as u64,
                 store_offset: archive_offset,
                 store_index: 0, // Will only be a single store setup for now
-                compression: protobuf::SingularPtrField::from_option(use_compression),
+                compression: protobuf::SingularPtrField::from_option(Some(use_compression.into())),
                 unknown_fields: std::default::Default::default(),
                 cached_size: std::default::Default::default(),
             });
@@ -135,7 +101,7 @@ fn chunk_into_file(
                 ChunkStoreType::Directory(ref chunk_dir_path) => {
                     let chunk_file_path = chunk_dir_path
                         .join(buf_to_hex_str(hash))
-                        .with_extension("chunk".to_string() + compression_ending);
+                        .with_extension("chunk".to_string() + use_compression.file_extension());
 
                     // TODO: If file exist - overwrite or verify the content and leave as is?
                     let mut chunk_file = OpenOptions::new()

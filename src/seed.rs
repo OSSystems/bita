@@ -5,9 +5,9 @@ use std::io::prelude::*;
 use std::path::Path;
 
 use crate::archive_reader::*;
-use crate::chunk_dictionary;
 use crate::chunker::{Chunker, ChunkerParams};
 use crate::chunker_utils::*;
+use crate::compression::Compression;
 use crate::errors::*;
 use crate::local_reader_backend::LocalReaderBackend;
 use threadpool::ThreadPool;
@@ -27,12 +27,7 @@ pub fn from_stream<T, F>(
 ) -> Result<()>
 where
     T: Read,
-    F: FnMut(
-        &HashBuf,
-        DataVerified,
-        chunk_dictionary::ChunkCompression_CompressionType,
-        Vec<u8>,
-    ) -> Result<()>,
+    F: FnMut(&HashBuf, DataVerified, Compression, Vec<u8>) -> Result<()>,
 {
     // Generate strong hash for a chunk
     let hasher = |data: &[u8]| {
@@ -46,7 +41,7 @@ where
             chunk_data_callback(
                 hash,
                 DataVerified::Yes,
-                chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                Compression::None,
                 hashed_chunk.data,
             )
             .expect("write to output from seed");
@@ -74,12 +69,7 @@ pub fn from_file<F>(
     pool: &ThreadPool,
 ) -> Result<()>
 where
-    F: FnMut(
-        &HashBuf,
-        DataVerified,
-        chunk_dictionary::ChunkCompression_CompressionType,
-        Vec<u8>,
-    ) -> Result<()>,
+    F: FnMut(&HashBuf, DataVerified, Compression, Vec<u8>) -> Result<()>,
 {
     // Test if the given seed can be read as a bita archive.
     let mut seed_input = File::open(file_path)
@@ -116,7 +106,7 @@ where
                     chunk_data_callback(
                         &chunk_descriptor.checksum,
                         DataVerified::No,
-                        chunk_descriptor.compression.get_compression(),
+                        chunk_descriptor.compression,
                         chunk_data,
                     )?;
                     chunk_hash_set.remove(&chunk_descriptor.checksum);

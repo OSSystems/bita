@@ -1,15 +1,15 @@
 use blake2::{Blake2b, Digest};
-use crate::chunker_utils::HashBuf;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::prelude::*;
 use std::path::Path;
 use std::rc::Rc;
-use crate::string_utils::*;
 
 use crate::archive;
 use crate::chunk_dictionary;
+use crate::chunker_utils::HashBuf;
 use crate::errors::*;
+use crate::string_utils::*;
 
 #[derive(Debug)]
 pub struct ArchiveReader {
@@ -166,7 +166,7 @@ impl ArchiveReader {
             chunk_descriptors.push(archive::ChunkDescriptor {
                 checksum: desc.checksum.clone(),
                 size: desc.size,
-                compression: desc.compression.clone().unwrap_or_default(),
+                compression: desc.compression.clone().unwrap_or_default().into(),
                 stored_size: desc.stored_size,
                 store_offset: desc.store_offset,
                 // Use Rc to only store a reference to the actual store object

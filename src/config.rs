@@ -1,5 +1,6 @@
-use crate::chunk_dictionary;
 use std::path::PathBuf;
+
+use crate::compression::Compression;
 
 #[derive(Debug)]
 pub struct BaseConfig {
@@ -10,12 +11,6 @@ pub struct BaseConfig {
 pub enum ChunkStoreType {
     Directory(PathBuf),
     Archive(PathBuf),
-}
-
-#[derive(Debug)]
-pub struct Compression {
-    pub level: u32,
-    pub algorithm: chunk_dictionary::ChunkCompression_CompressionType,
 }
 
 #[derive(Debug)]
@@ -34,9 +29,10 @@ pub struct CompressConfig {
     pub compression: Compression,
 }
 
-#[derive(Debug)]
-pub enum CloneOutput {
+#[derive(Debug, Clone)]
+pub enum CloneTarget {
     StoreDirectory(Compression),
+    StoreArchive(Compression),
     Unpack,
 }
 

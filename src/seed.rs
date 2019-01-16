@@ -12,7 +12,7 @@ use crate::errors::*;
 use crate::local_reader_backend::LocalReaderBackend;
 use threadpool::ThreadPool;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum DataVerified {
     Yes,
     No,

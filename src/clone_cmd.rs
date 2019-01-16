@@ -15,7 +15,7 @@ use threadpool::ThreadPool;
 use crate::archive;
 use crate::archive_reader::*;
 use crate::chunk_dictionary;
-use crate::chunker::Chunker;
+use crate::chunker::{Chunker, ChunkerParams};
 use crate::chunker_utils::*;
 use crate::config::*;
 use crate::errors::*;
@@ -134,8 +134,7 @@ where
     ) -> Result<()>,
 {
     // Setup chunker to use when chunking seed input
-    let chunker = Chunker::new(
-        1024 * 1024,
+    let chunker_params = ChunkerParams::new(
         archive.chunk_filter_bits,
         archive.min_chunk_size,
         archive.max_chunk_size,
@@ -148,10 +147,9 @@ where
         let stdin = io::stdin();
         println!("Scanning stdin for chunks...");
         let chunks_missing = chunks_left.len();
-        let mut chunker = chunker.clone();
+        let mut stdin = stdin.lock();
         seed::from_stream(
-            stdin.lock(),
-            &mut chunker,
+            Chunker::new(chunker_params.clone(), &mut stdin),
             archive.hash_length,
             chunks_left,
             &mut seed_output,
@@ -169,7 +167,7 @@ where
             println!("Scanning {} for chunks...", file_path.display());
             seed::from_file(
                 file_path,
-                chunker.clone(),
+                &chunker_params,
                 archive.hash_length,
                 chunks_left,
                 &mut seed_output,

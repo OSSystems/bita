@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::archive_reader::*;
 use crate::chunk_dictionary;
-use crate::chunker::Chunker;
+use crate::chunker::{Chunker, ChunkerParams};
 use crate::chunker_utils::*;
 use crate::errors::*;
 use crate::local_reader_backend::LocalReaderBackend;
@@ -19,8 +19,7 @@ pub enum DataVerified {
 }
 
 pub fn from_stream<T, F>(
-    mut seed_input: T,
-    chunker: &mut Chunker,
+    mut chunker: Chunker<T>,
     hash_length: usize,
     chunk_hash_set: &mut HashSet<HashBuf>,
     mut chunk_data_callback: F,
@@ -41,26 +40,19 @@ where
         hasher.input(data);
         hasher.result().to_vec()
     };
-    unique_chunks(
-        &mut seed_input,
-        chunker,
-        hasher,
-        &pool,
-        false,
-        |hashed_chunk| {
-            let hash = &hashed_chunk.hash[0..hash_length].to_vec();
-            if chunk_hash_set.contains(hash) {
-                chunk_data_callback(
-                    hash,
-                    DataVerified::Yes,
-                    chunk_dictionary::ChunkCompression_CompressionType::NONE,
-                    hashed_chunk.data,
-                )
-                .expect("write to output from seed");
-                chunk_hash_set.remove(hash);
-            }
-        },
-    )
+    unique_chunks(&mut chunker, hasher, &pool, false, |hashed_chunk| {
+        let hash = &hashed_chunk.hash[0..hash_length].to_vec();
+        if chunk_hash_set.contains(hash) {
+            chunk_data_callback(
+                hash,
+                DataVerified::Yes,
+                chunk_dictionary::ChunkCompression_CompressionType::NONE,
+                hashed_chunk.data,
+            )
+            .expect("write to output from seed");
+            chunk_hash_set.remove(hash);
+        }
+    })
     .chain_err(|| "failed to get unique chunks")?;
 
     println!(
@@ -75,7 +67,7 @@ where
 
 pub fn from_file<F>(
     file_path: &Path,
-    mut chunker: Chunker,
+    chunker_params: &ChunkerParams,
     hash_length: usize,
     chunk_hash_set: &mut HashSet<HashBuf>,
     mut chunk_data_callback: F,
@@ -98,11 +90,10 @@ where
         Err(Error(ErrorKind::NotAnArchive(_), _)) => {
             // As the input file was not an archive we feed the data read so
             // far into the chunker.
+            let mut chunker = Chunker::new(chunker_params.clone(), &mut seed_input);
             chunker.preload(&archive_header);
-
             from_stream(
-                seed_input,
-                &mut chunker,
+                chunker,
                 hash_length,
                 chunk_hash_set,
                 chunk_data_callback,

@@ -1,3 +1,4 @@
+use crate::string_utils::*;
 use atty::Stream;
 use blake2::{Blake2b, Digest};
 use lzma::LzmaWriter;
@@ -5,7 +6,6 @@ use protobuf::{RepeatedField, SingularPtrField};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::Write;
-use crate::string_utils::*;
 use threadpool::ThreadPool;
 
 use crate::archive;
@@ -30,8 +30,7 @@ fn chunk_into_file(
     archive_file: &mut Option<File>,
 ) -> Result<ChunkFileDescriptor> {
     // Setup the chunker
-    let mut chunker = Chunker::new(
-        1024 * 1024,
+    let chunker_params = ChunkerParams::new(
         config.chunk_filter_bits,
         config.min_chunk_size,
         config.max_chunk_size,
@@ -167,9 +166,8 @@ fn chunk_into_file(
             // Read source from file
             let mut src_file = File::open(&input_path)
                 .chain_err(|| format!("unable to open input file ({})", input_path.display()))?;
-
+            let mut chunker = Chunker::new(chunker_params.clone(), &mut src_file);
             let (tmp_file_size, tmp_file_hash, tmp_chunks) = unique_compressed_chunks(
-                &mut src_file,
                 &mut chunker,
                 hasher,
                 chunk_compressor,
@@ -185,8 +183,8 @@ fn chunk_into_file(
             // Read source from stdin
             let stdin = io::stdin();
             let mut src_file = stdin.lock();
+            let mut chunker = Chunker::new(chunker_params.clone(), &mut src_file);
             let (tmp_file_size, tmp_file_hash, tmp_chunks) = unique_compressed_chunks(
-                &mut src_file,
                 &mut chunker,
                 hasher,
                 chunk_compressor,

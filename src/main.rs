@@ -5,6 +5,7 @@ extern crate blake2;
 extern crate clap;
 extern crate crossbeam_channel;
 extern crate curl;
+extern crate indicatif;
 extern crate lzma;
 extern crate num_cpus;
 extern crate protobuf;
@@ -28,6 +29,7 @@ mod remote_archive_backend;
 mod string_utils;
 
 use clap::{App, Arg, SubCommand};
+
 use std::path::Path;
 use std::process;
 use threadpool::ThreadPool;
@@ -153,6 +155,9 @@ fn parse_opts() -> Result<Config> {
 
     let base_config = BaseConfig {
         force_create: matches.is_present("force-create"),
+        progress_style: ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .progress_chars("##-"),
     };
 
     if let Some(matches) = matches.subcommand_matches("compress") {
@@ -241,9 +246,33 @@ fn parse_opts() -> Result<Config> {
     }
 }
 
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::{thread, time};
+
 fn main() {
     let num_threads = num_cpus::get();
     let pool = ThreadPool::new(num_threads);
+
+    /*let pb_style = ProgressStyle::default_bar()
+    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+    .progress_chars("##-");*/
+    //let pb_multi = MultiProgress::new();
+    /*let bar1 = multi.add(ProgressBar::new(1000));
+    let _ = thread::spawn(move || {
+        bar1.set_style(sty);
+        for i in 0..1000 {
+            bar1.set_message(&format!("item #{}", i + 1));
+            thread::sleep(time::Duration::from_millis(100));
+            bar1.inc(1);
+        }
+        bar1.finish_with_message("done");
+    });*/
+    //bar1.finish();
+    /*thread::spawn(move || {
+        multi.join_and_clear();
+    });*/
+    //multi.join_and_clear();
+    //println!("End");
 
     let result = match parse_opts() {
         Ok(Config::Compress(config)) => compress_cmd::run(&config, &pool),

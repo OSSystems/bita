@@ -1,5 +1,6 @@
 use atty::Stream;
 use blake2::{Blake2b, Digest};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -143,7 +144,7 @@ where
                 |checksum, chunk_data| {
                     total_read_from_seed += chunk_data.len();
                     chunk_output(
-                        &format!("seed ({})", seed_path.display()),
+                        &format!("scanning seed {}", seed_path.display()),
                         checksum,
                         chunk_data,
                     );
@@ -166,7 +167,7 @@ where
         &chunks_left,
         |checksum, chunk_data| {
             total_from_archive += chunk_data.len();
-            chunk_output("archive", &checksum, chunk_data);
+            chunk_output("reading from archive", &checksum, chunk_data);
             Ok(())
         },
     )?;
@@ -218,6 +219,17 @@ where
 {
     let archive = ArchiveReader::try_init(&mut archive_backend, &mut Vec::new())?;
     let chunks_left = archive.chunk_hash_set();
+    let pb_style = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({msg})")
+        .progress_chars("##-");
+
+    let pb_multi = MultiProgress::new();
+    let total_size_bar = pb_multi.add(ProgressBar::new(archive.source_total_size));
+    total_size_bar.set_style(pb_style);
+
+    std::thread::spawn(move || {
+        pb_multi.join_and_clear();
+    });
 
     println!("Cloning archive ({})", archive);
 
@@ -245,6 +257,7 @@ where
     prepare_unpack_output(&mut output_file, archive.source_total_size)?;
 
     let mut output_file = BufWriter::new(output_file);
+    let mut chunk_counter = 0;
     clone_to_output(
         pool,
         archive_backend,
@@ -254,14 +267,18 @@ where
         chunker_params,
         chunks_left,
         |chunk_source: &str, hash: &HashBuf, chunk_data: &[u8]| {
-            println!(
+            /*println!(
                 "Chunk '{}', size {} used from {}",
                 HexSlice::new(hash),
                 size_to_str(chunk_data.len()),
                 chunk_source,
-            );
+            );*/
 
-            for offset in &archive.chunk_source_offsets(hash) {
+            let offsets = archive.chunk_source_offsets(hash);
+            chunk_counter += 1;
+            total_size_bar.set_message(&format!("{}", chunk_source));
+            total_size_bar.inc((chunk_data.len() as u64) * offsets.len() as u64);
+            for offset in &offsets {
                 output_file
                     .seek(SeekFrom::Start(*offset))
                     .expect("seek output");
@@ -269,6 +286,9 @@ where
             }
         },
     )?;
+
+    //total_size_bar.finish();
+    total_size_bar.finish_with_message("done");
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+use indicatif::ProgressStyle;
 use std::path::PathBuf;
 
 use crate::compression::Compression;
@@ -5,6 +6,7 @@ use crate::compression::Compression;
 #[derive(Debug)]
 pub struct BaseConfig {
     pub force_create: bool,
+    pub progress_style: ProgressStyle,
 }
 
 #[derive(Debug)]
